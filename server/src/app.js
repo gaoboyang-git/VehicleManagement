@@ -2,13 +2,17 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
+import { PrismaBetterSQLite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import cors from "cors";
 import express from "express";
 import * as XLSX from "xlsx";
 
-const defaultPrisma = new PrismaClient();
+const databaseUrl = process.env.DATABASE_URL ?? "file:./dev.db";
+const defaultPrisma = new PrismaClient({
+  adapter: new PrismaBetterSQLite3({ url: databaseUrl })
+});
 
 function toPublicUser(user) {
   return {
