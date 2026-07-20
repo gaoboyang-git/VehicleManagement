@@ -1,0 +1,54 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String   @id @default(cuid())
+  username       String   @unique
+  passwordHash   String
+  role           String
+  isBuiltinAdmin Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  records        VehicleUseRecord[]
+}
+
+model Vehicle {
+  id          String   @id @default(cuid())
+  vehicleCode String   @unique
+  plateNumber String   @unique
+  brandModel  String
+  isDeleted   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  records     VehicleUseRecord[]
+}
+
+model VehicleUseRecord {
+  id              String   @id @default(cuid())
+  vehicleId       String
+  userId          String
+  businessDate    String
+  departureTime   String
+  returnTime      String
+  reason          String
+  route           String
+  startMileage    Float
+  endMileage      Float
+  distance        Float
+  isCrossDay      Boolean  @default(false)
+  fuelFee         String?
+  fuelVolume      String?
+  driverSignature String
+  remark          String?
+  createdAt       DateTime @default(now())
+  vehicle         Vehicle  @relation(fields: [vehicleId], references: [id])
+  user            User     @relation(fields: [userId], references: [id])
+
+  @@index([vehicleId, createdAt])
+  @@index([userId, createdAt])
+}

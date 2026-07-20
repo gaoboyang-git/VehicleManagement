@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: vibe-coding-vehicle-registry
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start:render
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        value: file:/var/data/dev.db
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1
