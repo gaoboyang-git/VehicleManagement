@@ -89,6 +89,84 @@ async function readApiMessage(response) {
   return body.message ?? "请求失败，请稍后重试";
 }
 
+function isComplexPassword(value) {
+  const text = String(value ?? "");
+  return text.length >= 6 && /[A-Za-z]/.test(text) && /\d/.test(text);
+}
+
+function normalizeDecimalInput(value) {
+  const text = String(value ?? "");
+  if (!text) {
+    return "";
+  }
+
+  let next = text.replace(/[^\d.]/g, "");
+  const dotIndex = next.indexOf(".");
+  if (dotIndex >= 0) {
+    next = `${next.slice(0, dotIndex + 1)}${next.slice(dotIndex + 1).replace(/\./g, "")}`;
+  }
+
+  return next;
+}
+
+function formatFuelDisplay(fuelFee, fuelVolume) {
+  const feeText = String(fuelFee ?? "").trim();
+  const volumeText = String(fuelVolume ?? "").trim();
+
+  if (!feeText && !volumeText) {
+    return "-";
+  }
+
+  return `${feeText ? `${feeText}元` : "-"}/${volumeText ? `${volumeText}L` : "-"}`;
+}
+
+function buildRecordQueryString(filters) {
+  const params = new URLSearchParams();
+  params.set("keyword", String(filters.keyword ?? ""));
+  params.set("vehicleCode", String(filters.vehicleCode ?? ""));
+  params.set("registrantUsername", String(filters.registrantUsername ?? ""));
+  params.set("businessDate", String(filters.businessDate ?? ""));
+  return params.toString();
+}
+
+function PasswordField({
+  label,
+  value,
+  onChange,
+  error = "",
+  autoComplete,
+  inputAriaLabel,
+  toggleLabelPrefix
+}) {
+  const [isVisible, setIsVisible] = useState(false);
+  const inputLabel = inputAriaLabel ?? label;
+  const toggleLabelBase = toggleLabelPrefix ?? label;
+
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <div className="password-input-row">
+        <input
+          aria-label={inputLabel}
+          autoComplete={autoComplete}
+          type={isVisible ? "text" : "password"}
+          value={value}
+          onChange={onChange}
+        />
+        <button
+          aria-label={`${isVisible ? "隐藏" : "显示"}${toggleLabelBase}`}
+          className="ghost-button password-toggle"
+          type="button"
+          onClick={() => setIsVisible((current) => !current)}
+        >
+          {isVisible ? "隐藏" : "显示"}
+        </button>
+      </div>
+      {error ? <small className="error">{error}</small> : null}
+    </label>
+  );
+}
+
 export function App() {
   const employeeRegistryView = "employeeRegistry";
   const adminHomeView = "adminHome";
@@ -141,6 +219,8 @@ export function App() {
   });
   const [pendingDeleteVehicle, setPendingDeleteVehicle] = useState(null);
   const [pendingDeleteRecord, setPendingDeleteRecord] = useState(null);
+  const [selectedRecordIds, setSelectedRecordIds] = useState([]);
+  const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
   const [recordFilters, setRecordFilters] = useState({
     keyword: "",
     vehicleCode: "",
@@ -205,6 +285,7 @@ export function App() {
     setIsAddVehicleOpen(false);
     setPendingDeleteVehicle(null);
     setPendingDeleteRecord(null);
+    setIsBulkDeleteOpen(false);
   }
 
   function resetPasswordModuleState() {
@@ -244,10 +325,13 @@ export function App() {
   }
 
   function updateRegistryField(field, value) {
+    const normalizedValue =
+      field === "fuelFee" || field === "fuelVolume" ? normalizeDecimalInput(value) : value;
+
     setRegistryForm((current) => {
       const next = {
         ...current,
-        [field]: value
+        [field]: normalizedValue
       };
 
       if (field === "startMileage" || field === "endMileage") {
@@ -261,6 +345,9 @@ export function App() {
   }
 
   function updateRecordFilter(field, value) {
+    setSelectedRecordIds([]);
+    setPendingDeleteRecord(null);
+    setIsBulkDeleteOpen(false);
     setRecordFilters((current) => ({
       ...current,
       [field]: value
@@ -268,6 +355,9 @@ export function App() {
   }
 
   function clearRecordFilters() {
+    setSelectedRecordIds([]);
+    setPendingDeleteRecord(null);
+    setIsBulkDeleteOpen(false);
     setRecordFilters({
       keyword: "",
       vehicleCode: "",
@@ -322,7 +412,8 @@ export function App() {
   }
 
   async function handleExportRecords() {
-    const response = await fetch("/api/records/export", {
+    const queryString = buildRecordQueryString(recordFilters);
+    const response = await fetch(`/api/records/export?${queryString}`, {
       credentials: "include"
     });
 
@@ -463,6 +554,11 @@ export function App() {
 
     if (passwordForm.newPassword === passwordForm.currentPassword) {
       setPasswordMessage("新密码不能与当前密码相同");
+      return;
+    }
+
+    if (!isComplexPassword(passwordForm.newPassword)) {
+      setPasswordMessage("新密码需至少 6 位且同时包含字母和数字");
       return;
     }
 
@@ -702,6 +798,35 @@ export function App() {
     }
   }
 
+  async function confirmBatchDeleteRecords() {
+    if (selectedRecordIds.length === 0) {
+      setUserManagementMessage("请选择至少一条记录");
+      return;
+    }
+
+    const response = await fetch("/api/records/batch-delete", {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ ids: selectedRecordIds })
+    });
+
+    if (!response.ok) {
+      setUserManagementMessage(await readApiMessage(response));
+      return;
+    }
+
+    const body = await response.json().catch(() => ({}));
+    setManagedRecords((current) =>
+      current.filter((record) => !selectedRecordIds.includes(record.id))
+    );
+    setSelectedRecordIds([]);
+    setIsBulkDeleteOpen(false);
+    setUserManagementMessage(body.message ?? "记录已批量删除");
+  }
+
   async function handleResetPassword(event) {
     event.preventDefault();
 
@@ -876,6 +1001,9 @@ export function App() {
 
     return matchesKeyword && matchesVehicle && matchesUser && matchesDate;
   });
+  const areAllFilteredRecordsSelected =
+    filteredManagedRecords.length > 0 &&
+    filteredManagedRecords.every((record) => selectedRecordIds.includes(record.id));
 
   if (!user) {
     return (
@@ -896,16 +1024,13 @@ export function App() {
               {loginErrors.username ? <small className="error">{loginErrors.username}</small> : null}
             </label>
 
-            <label className="field">
-              <span>密码</span>
-              <input
-                autoComplete="current-password"
-                type="password"
-                value={loginForm.password}
-                onChange={(event) => updateLoginField("password", event.target.value)}
-              />
-              {loginErrors.password ? <small className="error">{loginErrors.password}</small> : null}
-            </label>
+            <PasswordField
+              autoComplete="current-password"
+              error={loginErrors.password}
+              label="密码"
+              value={loginForm.password}
+              onChange={(event) => updateLoginField("password", event.target.value)}
+            />
 
             {loginMessage ? <p className="message">{loginMessage}</p> : null}
 
@@ -1053,17 +1178,23 @@ export function App() {
                 ) : null}
               </label>
               <label className="field">
-                <span>加油费用</span>
+                <span>加油费用（元）</span>
                 <input
-                  aria-label="加油费用"
+                  aria-label="加油费用（元）"
+                  type="number"
+                  min="0"
+                  step="any"
                   value={registryForm.fuelFee}
                   onChange={(event) => updateRegistryField("fuelFee", event.target.value)}
                 />
               </label>
               <label className="field">
-                <span>加油数量</span>
+                <span>加油数量（升）</span>
                 <input
-                  aria-label="加油数量"
+                  aria-label="加油数量（升）"
+                  type="number"
+                  min="0"
+                  step="any"
                   value={registryForm.fuelVolume}
                   onChange={(event) => updateRegistryField("fuelVolume", event.target.value)}
                 />
@@ -1106,42 +1237,27 @@ export function App() {
           {isPasswordDialogOpen ? (
             <form className="password-dialog inline-panel" onSubmit={handleChangePassword} noValidate>
               <h2>修改密码</h2>
-              <label className="field">
-                <span>当前密码</span>
-                <input
-                  autoComplete="current-password"
-                  type="password"
-                  value={passwordForm.currentPassword}
-                  onChange={(event) => updatePasswordField("currentPassword", event.target.value)}
-                />
-                {passwordErrors.currentPassword ? (
-                  <small className="error">{passwordErrors.currentPassword}</small>
-                ) : null}
-              </label>
-              <label className="field">
-                <span>新密码</span>
-                <input
-                  autoComplete="new-password"
-                  type="password"
-                  value={passwordForm.newPassword}
-                  onChange={(event) => updatePasswordField("newPassword", event.target.value)}
-                />
-                {passwordErrors.newPassword ? (
-                  <small className="error">{passwordErrors.newPassword}</small>
-                ) : null}
-              </label>
-              <label className="field">
-                <span>确认新密码</span>
-                <input
-                  autoComplete="new-password"
-                  type="password"
-                  value={passwordForm.confirmPassword}
-                  onChange={(event) => updatePasswordField("confirmPassword", event.target.value)}
-                />
-                {passwordErrors.confirmPassword ? (
-                  <small className="error">{passwordErrors.confirmPassword}</small>
-                ) : null}
-              </label>
+              <PasswordField
+                autoComplete="current-password"
+                error={passwordErrors.currentPassword}
+                label="当前密码"
+                value={passwordForm.currentPassword}
+                onChange={(event) => updatePasswordField("currentPassword", event.target.value)}
+              />
+              <PasswordField
+                autoComplete="new-password"
+                error={passwordErrors.newPassword}
+                label="新密码"
+                value={passwordForm.newPassword}
+                onChange={(event) => updatePasswordField("newPassword", event.target.value)}
+              />
+              <PasswordField
+                autoComplete="new-password"
+                error={passwordErrors.confirmPassword}
+                label="确认新密码"
+                value={passwordForm.confirmPassword}
+                onChange={(event) => updatePasswordField("confirmPassword", event.target.value)}
+              />
 
               {passwordMessage ? <p className="message">{passwordMessage}</p> : null}
 
@@ -1316,16 +1432,13 @@ export function App() {
                   />
                   {newUserErrors.username ? <small className="error">{newUserErrors.username}</small> : null}
                 </label>
-                <label className="field">
-                  <span>初始密码</span>
-                  <input
-                    autoComplete="new-password"
-                    type="password"
-                    value={newUserForm.password}
-                    onChange={(event) => updateNewUserField("password", event.target.value)}
-                  />
-                  {newUserErrors.password ? <small className="error">{newUserErrors.password}</small> : null}
-                </label>
+                <PasswordField
+                  autoComplete="new-password"
+                  error={newUserErrors.password}
+                  label="初始密码"
+                  value={newUserForm.password}
+                  onChange={(event) => updateNewUserField("password", event.target.value)}
+                />
                 <label className="field">
                   <span>角色</span>
                   <select
@@ -1374,30 +1487,20 @@ export function App() {
             {resetUser ? (
               <form className="password-dialog inline-panel" onSubmit={handleResetPassword} noValidate>
                 <h2>重置 {resetUser.username} 密码</h2>
-                <label className="field">
-                  <span>重置新密码</span>
-                  <input
-                    autoComplete="new-password"
-                    type="password"
-                    value={resetPasswordForm.newPassword}
-                    onChange={(event) => updateResetPasswordField("newPassword", event.target.value)}
-                  />
-                  {resetPasswordErrors.newPassword ? (
-                    <small className="error">{resetPasswordErrors.newPassword}</small>
-                  ) : null}
-                </label>
-                <label className="field">
-                  <span>确认重置密码</span>
-                  <input
-                    autoComplete="new-password"
-                    type="password"
-                    value={resetPasswordForm.confirmPassword}
-                    onChange={(event) => updateResetPasswordField("confirmPassword", event.target.value)}
-                  />
-                  {resetPasswordErrors.confirmPassword ? (
-                    <small className="error">{resetPasswordErrors.confirmPassword}</small>
-                  ) : null}
-                </label>
+                <PasswordField
+                  autoComplete="new-password"
+                  error={resetPasswordErrors.newPassword}
+                  label="重置新密码"
+                  value={resetPasswordForm.newPassword}
+                  onChange={(event) => updateResetPasswordField("newPassword", event.target.value)}
+                />
+                <PasswordField
+                  autoComplete="new-password"
+                  error={resetPasswordErrors.confirmPassword}
+                  label="确认重置密码"
+                  value={resetPasswordForm.confirmPassword}
+                  onChange={(event) => updateResetPasswordField("confirmPassword", event.target.value)}
+                />
                 <div className="action-row">
                   <button className="primary-button" type="submit">
                     提交重置
@@ -1613,6 +1716,37 @@ export function App() {
             </div>
 
             <div className="action-row">
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={() => {
+                  setPendingDeleteRecord(null);
+                  setUserManagementMessage("");
+                  setIsBulkDeleteOpen(false);
+                  setSelectedRecordIds((current) =>
+                    areAllFilteredRecordsSelected ? [] : filteredManagedRecords.map((record) => record.id)
+                  );
+                }}
+              >
+                全选当前筛选结果
+              </button>
+              <button
+                className="secondary-button"
+                disabled={selectedRecordIds.length === 0}
+                type="button"
+                onClick={() => {
+                  if (selectedRecordIds.length === 0) {
+                    return;
+                  }
+
+                  setPendingDeleteRecord(null);
+                  setUserManagementMessage("");
+                  setIsBulkDeleteOpen((current) => !current);
+                }}
+              >
+                批量删除
+              </button>
+              <p>已选 {selectedRecordIds.length} 条</p>
               <button className="ghost-button" type="button" onClick={clearRecordFilters}>
                 清空筛选
               </button>
@@ -1632,7 +1766,7 @@ export function App() {
                     <p>登记人：{record.registrantUsername}</p>
                     <p>路线：{record.route}</p>
                     <p>
-                      加油：{record.fuelFee ?? "-"} / {record.fuelVolume ?? "-"}
+                      加油：{formatFuelDisplay(record.fuelFee, record.fuelVolume)}
                     </p>
                     <p>驾驶员：{record.driverSignature}</p>
                     <small>
@@ -1642,6 +1776,24 @@ export function App() {
                     </small>
                   </div>
                   <div className="action-row">
+                    <label className="record-select">
+                      <input
+                        aria-label={`选择记录 ${record.reason}`}
+                        checked={selectedRecordIds.includes(record.id)}
+                        type="checkbox"
+                        onChange={() => {
+                          setUserManagementMessage("");
+                          setPendingDeleteRecord(null);
+                          setIsBulkDeleteOpen(false);
+                          setSelectedRecordIds((current) =>
+                            current.includes(record.id)
+                              ? current.filter((id) => id !== record.id)
+                              : [...current, record.id]
+                          );
+                        }}
+                      />
+                      <span>选择</span>
+                    </label>
                     <button
                       aria-label={`删除记录 ${record.reason}`}
                       className="ghost-button"
@@ -1680,6 +1832,27 @@ export function App() {
                 </div>
               </section>
             ) : null}
+
+            {isBulkDeleteOpen ? (
+              <section className="password-dialog inline-panel" aria-label="批量删除记录确认">
+                <h2>批量删除记录</h2>
+                <p>确认删除已选 {selectedRecordIds.length} 条记录？</p>
+                <div className="action-row">
+                  <button className="primary-button" type="button" onClick={confirmBatchDeleteRecords}>
+                    确认批量删除
+                  </button>
+                  <button
+                    className="ghost-button"
+                    type="button"
+                    onClick={() => {
+                      setIsBulkDeleteOpen(false);
+                    }}
+                  >
+                    取消批量删除
+                  </button>
+                </div>
+              </section>
+            ) : null}
           </section>
         ) : null}
 
@@ -1691,42 +1864,27 @@ export function App() {
             </div>
 
             <form className="password-dialog" onSubmit={handleChangePassword} noValidate>
-              <label className="field">
-                <span>当前密码</span>
-                <input
-                  autoComplete="current-password"
-                  type="password"
-                  value={passwordForm.currentPassword}
-                  onChange={(event) => updatePasswordField("currentPassword", event.target.value)}
-                />
-                {passwordErrors.currentPassword ? (
-                  <small className="error">{passwordErrors.currentPassword}</small>
-                ) : null}
-              </label>
-              <label className="field">
-                <span>新密码</span>
-                <input
-                  autoComplete="new-password"
-                  type="password"
-                  value={passwordForm.newPassword}
-                  onChange={(event) => updatePasswordField("newPassword", event.target.value)}
-                />
-                {passwordErrors.newPassword ? (
-                  <small className="error">{passwordErrors.newPassword}</small>
-                ) : null}
-              </label>
-              <label className="field">
-                <span>确认新密码</span>
-                <input
-                  autoComplete="new-password"
-                  type="password"
-                  value={passwordForm.confirmPassword}
-                  onChange={(event) => updatePasswordField("confirmPassword", event.target.value)}
-                />
-                {passwordErrors.confirmPassword ? (
-                  <small className="error">{passwordErrors.confirmPassword}</small>
-                ) : null}
-              </label>
+              <PasswordField
+                autoComplete="current-password"
+                error={passwordErrors.currentPassword}
+                label="当前密码"
+                value={passwordForm.currentPassword}
+                onChange={(event) => updatePasswordField("currentPassword", event.target.value)}
+              />
+              <PasswordField
+                autoComplete="new-password"
+                error={passwordErrors.newPassword}
+                label="新密码"
+                value={passwordForm.newPassword}
+                onChange={(event) => updatePasswordField("newPassword", event.target.value)}
+              />
+              <PasswordField
+                autoComplete="new-password"
+                error={passwordErrors.confirmPassword}
+                label="确认新密码"
+                value={passwordForm.confirmPassword}
+                onChange={(event) => updatePasswordField("confirmPassword", event.target.value)}
+              />
 
               {passwordMessage ? <p className="message">{passwordMessage}</p> : null}
 

@@ -123,7 +123,7 @@ describe("Issue 2 user management API", () => {
 
     const createResponse = await agent.post("/api/users").send({
       username: "new_employee",
-      password: "NewEmployee001",
+      password: "123",
       role: "employee"
     });
     const duplicateResponse = await agent.post("/api/users").send({
@@ -138,6 +138,10 @@ describe("Issue 2 user management API", () => {
       role: "employee",
       isBuiltinAdmin: false
     }));
+    await request(app)
+      .post("/api/login")
+      .send({ username: "new_employee", password: "123" })
+      .expect(200);
     expect(duplicateResponse.status).toBe(409);
     expect(duplicateResponse.body).toEqual({ message: "账号已存在" });
   });
@@ -210,15 +214,15 @@ describe("Issue 2 user management API", () => {
     });
 
     const response = await agent.post(`/api/users/${employee.id}/reset-password`).send({
-      newPassword: "ResetEmployee001",
-      confirmPassword: "ResetEmployee001"
+      newPassword: "123",
+      confirmPassword: "123"
     });
 
     expect(response.status).toBe(200);
 
     await request(app)
       .post("/api/login")
-      .send({ username: "employee", password: "ResetEmployee001" })
+      .send({ username: "employee", password: "123" })
       .expect(200);
     await request(app)
       .post("/api/login")

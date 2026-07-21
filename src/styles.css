@@ -169,6 +169,17 @@ p {
   outline: 3px solid rgba(73, 98, 70, 0.18);
 }
 
+.password-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.password-toggle {
+  min-width: 72px;
+}
+
 .error,
 .message {
   color: #a63a2b;
@@ -215,6 +226,19 @@ p {
   min-height: 88px;
   border-radius: 20px;
   font-size: 18px;
+}
+
+.record-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #496246;
+  font-weight: 700;
+}
+
+.record-select input {
+  width: 18px;
+  height: 18px;
 }
 
 button {

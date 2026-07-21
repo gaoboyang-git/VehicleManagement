@@ -245,8 +245,8 @@ describe("Issue 4 registry API", () => {
       startMileage: 1000,
       endMileage: 1120,
       driverSignature: "张三",
-      fuelFee: "100",
-      fuelVolume: "20",
+      fuelFee: "100.5",
+      fuelVolume: "20.25",
       remark: "正常"
     });
 
@@ -262,7 +262,9 @@ describe("Issue 4 registry API", () => {
       expect.objectContaining({
         vehicleId: vehicle.id,
         distance: 120,
-        isCrossDay: false
+        isCrossDay: false,
+        fuelFee: "100.5",
+        fuelVolume: "20.25"
       })
     );
     expect(storedRecord).toEqual(
@@ -275,7 +277,9 @@ describe("Issue 4 registry API", () => {
         isCrossDay: false,
         businessDate: "2026-07-20",
         departureTime: "09:00",
-        returnTime: "10:00"
+        returnTime: "10:00",
+        fuelFee: "100.5",
+        fuelVolume: "20.25"
       })
     );
   });
@@ -460,6 +464,47 @@ describe("Issue 4 registry API", () => {
     expect(await prisma.vehicleUseRecord.count()).toBe(0);
   });
 
+  it("rejects non-numeric or negative fuel values", async () => {
+    const vehicle = await createVehicle(prisma, {
+      vehicleCode: "CAR-001",
+      plateNumber: "沪A-10001",
+      brandModel: "大众帕萨特"
+    });
+    const agent = await employeeAgent();
+
+    const invalidText = await agent.post("/api/records").send({
+      vehicleId: vehicle.id,
+      businessDate: "2026-07-20",
+      departureTime: "09:00",
+      returnTime: "10:00",
+      reason: "外出办事",
+      route: "园区-政务大厅",
+      startMileage: 1000,
+      endMileage: 1100,
+      driverSignature: "张三",
+      fuelFee: "abc",
+      fuelVolume: "20"
+    });
+    const invalidNegative = await agent.post("/api/records").send({
+      vehicleId: vehicle.id,
+      businessDate: "2026-07-20",
+      departureTime: "09:00",
+      returnTime: "10:00",
+      reason: "外出办事",
+      route: "园区-政务大厅",
+      startMileage: 1000,
+      endMileage: 1100,
+      driverSignature: "张三",
+      fuelFee: "10",
+      fuelVolume: "-1"
+    });
+
+    expect(invalidText.status).toBe(400);
+    expect(invalidText.body).toEqual({ message: "加油费用和加油数量必须为非负数字" });
+    expect(invalidNegative.status).toBe(400);
+    expect(invalidNegative.body).toEqual({ message: "加油费用和加油数量必须为非负数字" });
+  });
+
   it("rejects a stale submit when the selected vehicle has been deleted", async () => {
     const vehicle = await createVehicle(prisma, {
       vehicleCode: "CAR-001",
@@ -593,6 +638,70 @@ describe("Issue 4 registry API", () => {
     );
   });
 
+  it("filters records by keyword, vehicle, registrant, and date", async () => {
+    const admin = await prisma.user.findUnique({
+      where: {
+        username: "admin"
+      }
+    });
+    const employee = await prisma.user.findUnique({
+      where: {
+        username: "employee"
+      }
+    });
+    const vehicleA = await createVehicle(prisma, {
+      vehicleCode: "CAR-001",
+      plateNumber: "沪A-10001",
+      brandModel: "大众帕萨特"
+    });
+    const vehicleB = await createVehicle(prisma, {
+      vehicleCode: "CAR-002",
+      plateNumber: "沪A-10002",
+      brandModel: "别克GL8"
+    });
+
+    await createRecord(prisma, {
+      vehicleId: vehicleA.id,
+      userId: employee.id,
+      businessDate: "2026-07-20",
+      reason: "MATCH-ONE",
+      route: "园区-A"
+    });
+    await createRecord(prisma, {
+      vehicleId: vehicleA.id,
+      userId: admin.id,
+      businessDate: "2026-07-21",
+      reason: "MATCH-TWO",
+      route: "园区-B"
+    });
+    await createRecord(prisma, {
+      vehicleId: vehicleB.id,
+      userId: employee.id,
+      businessDate: "2026-07-21",
+      reason: "OTHER",
+      route: "园区-C"
+    });
+
+    const agent = await adminAgent();
+    const response = await agent.get("/api/records").query({
+      keyword: "MATCH",
+      vehicleCode: "CAR-001",
+      registrantUsername: "admin",
+      businessDate: "2026-07-21"
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.records).toHaveLength(1);
+    expect(response.body.records[0]).toEqual(
+      expect.objectContaining({
+        reason: "MATCH-TWO",
+        vehicleCode: "CAR-001",
+        registrantUsername: "admin",
+        businessDate: "2026-07-21"
+      })
+    );
+  });
+
   it("rejects record management reads and deletes for employees", async () => {
     const employee = await prisma.user.findUnique({
       where: {
@@ -660,6 +769,66 @@ describe("Issue 4 registry API", () => {
     expect(latestMileageResponse.status).toBe(200);
     expect(latestMileageResponse.body).toEqual({ startMileage: 900 });
     expect(listResponse.body.records.map((record) => record.reason)).toEqual(["REC-OLD"]);
+  });
+
+  it("batch deletes selected records and rejects empty selections", async () => {
+    const employee = await prisma.user.findUnique({
+      where: {
+        username: "employee"
+      }
+    });
+    const vehicleA = await createVehicle(prisma, {
+      vehicleCode: "CAR-001",
+      plateNumber: "沪A-10001",
+      brandModel: "大众帕萨特"
+    });
+    const vehicleB = await createVehicle(prisma, {
+      vehicleCode: "CAR-002",
+      plateNumber: "沪A-10002",
+      brandModel: "别克GL8"
+    });
+    await createRecord(prisma, {
+      vehicleId: vehicleA.id,
+      userId: employee.id,
+      businessDate: "2026-07-19",
+      endMileage: 900,
+      reason: "KEEP-OLD"
+    });
+    const latestA = await createRecord(prisma, {
+      vehicleId: vehicleA.id,
+      userId: employee.id,
+      businessDate: "2026-07-20",
+      startMileage: 900,
+      endMileage: 1000,
+      reason: "DELETE-A"
+    });
+    const deleteB = await createRecord(prisma, {
+      vehicleId: vehicleB.id,
+      userId: employee.id,
+      businessDate: "2026-07-20",
+      startMileage: 500,
+      endMileage: 600,
+      reason: "DELETE-B"
+    });
+
+    const agent = await adminAgent();
+
+    const emptyResponse = await agent.post("/api/records/batch-delete").send({ ids: [] });
+
+    expect(emptyResponse.status).toBe(400);
+    expect(emptyResponse.body).toEqual({ message: "请选择至少一条记录" });
+
+    const deleteResponse = await agent.post("/api/records/batch-delete").send({
+      ids: [latestA.id, deleteB.id]
+    });
+    const latestMileageResponse = await agent.get(`/api/vehicles/${vehicleA.id}/latest-mileage`);
+    const listResponse = await agent.get("/api/records");
+
+    expect(deleteResponse.status).toBe(200);
+    expect(deleteResponse.body).toEqual({ message: "已删除 2 条记录", deletedCount: 2 });
+    expect(await prisma.vehicleUseRecord.count()).toBe(1);
+    expect(latestMileageResponse.body).toEqual({ startMileage: 900 });
+    expect(listResponse.body.records.map((record) => record.reason)).toEqual(["KEEP-OLD"]);
   });
 
   it("exports all effective records to xlsx for an administrator", async () => {
@@ -810,6 +979,66 @@ describe("Issue 4 registry API", () => {
       "REC-C"
     ]);
     expect(rows.flat().includes("REC-DELETE")).toBe(false);
+  });
+
+  it("exports only records that match the current filters", async () => {
+    const admin = await prisma.user.findUnique({
+      where: {
+        username: "admin"
+      }
+    });
+    const employee = await prisma.user.findUnique({
+      where: {
+        username: "employee"
+      }
+    });
+    const vehicleA = await createVehicle(prisma, {
+      vehicleCode: "CAR-001",
+      plateNumber: "沪A-10001",
+      brandModel: "大众帕萨特"
+    });
+    const vehicleB = await createVehicle(prisma, {
+      vehicleCode: "CAR-002",
+      plateNumber: "沪A-10002",
+      brandModel: "别克GL8"
+    });
+
+    await createRecord(prisma, {
+      vehicleId: vehicleA.id,
+      userId: admin.id,
+      businessDate: "2026-07-21",
+      reason: "EXPORT-MATCH",
+      route: "园区-A"
+    });
+    await createRecord(prisma, {
+      vehicleId: vehicleA.id,
+      userId: employee.id,
+      businessDate: "2026-07-21",
+      reason: "EXPORT-OTHER-USER",
+      route: "园区-B"
+    });
+    await createRecord(prisma, {
+      vehicleId: vehicleB.id,
+      userId: admin.id,
+      businessDate: "2026-07-21",
+      reason: "EXPORT-OTHER-VEHICLE",
+      route: "园区-C"
+    });
+
+    const agent = await adminAgent();
+    const response = await getBinaryResponse(
+      agent,
+      "/api/records/export?keyword=EXPORT&vehicleCode=CAR-001&registrantUsername=admin&businessDate=2026-07-21"
+    );
+    const workbook = XLSX.read(response.body, { type: "buffer" });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+    expect(response.status).toBe(200);
+    expect(rows).toHaveLength(2);
+    expect(rows[1][0]).toBe("CAR-001");
+    expect(rows[1][2]).toBe("admin");
+    expect(rows[1][3]).toBe("EXPORT-MATCH");
   });
 
   it("rejects export for employees", async () => {

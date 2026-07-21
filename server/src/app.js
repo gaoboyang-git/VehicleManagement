@@ -138,7 +138,66 @@ function parseMileage(value) {
   return mileage;
 }
 
-async function loadManagedRecords(prisma) {
+function isComplexPassword(value) {
+  const text = String(value ?? "");
+  return text.length >= 6 && /[A-Za-z]/.test(text) && /\d/.test(text);
+}
+
+function isValidNonNegativeDecimal(value) {
+  if (value === null || value === undefined) {
+    return true;
+  }
+
+  const text = String(value).trim();
+
+  if (!text) {
+    return true;
+  }
+
+  if (!/^\d+(\.\d+)?$/.test(text)) {
+    return false;
+  }
+
+  return Number(text) >= 0;
+}
+
+function readRecordFilters(request) {
+  return {
+    keyword: String(request.query.keyword ?? "").trim().toLowerCase(),
+    vehicleCode: String(request.query.vehicleCode ?? "").trim(),
+    registrantUsername: String(request.query.registrantUsername ?? "").trim(),
+    businessDate: String(request.query.businessDate ?? "").trim()
+  };
+}
+
+function recordMatchesFilters(record, filters) {
+  const matchesKeyword = filters.keyword
+    ? [
+        record.reason,
+        record.route,
+        record.vehicle.vehicleCode,
+        record.vehicle.plateNumber,
+        record.user.username,
+        record.driverSignature,
+        record.remark ?? ""
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(filters.keyword)
+    : true;
+
+  const matchesVehicle = filters.vehicleCode
+    ? record.vehicle.vehicleCode === filters.vehicleCode
+    : true;
+  const matchesUser = filters.registrantUsername
+    ? record.user.username === filters.registrantUsername
+    : true;
+  const matchesDate = filters.businessDate ? record.businessDate === filters.businessDate : true;
+
+  return matchesKeyword && matchesVehicle && matchesUser && matchesDate;
+}
+
+async function loadManagedRecords(prisma, filters = {}) {
   const records = await prisma.vehicleUseRecord.findMany({
     include: {
       vehicle: true,
@@ -146,17 +205,19 @@ async function loadManagedRecords(prisma) {
     }
   });
 
-  return records.sort((left, right) => {
-    if (left.vehicle.vehicleCode !== right.vehicle.vehicleCode) {
-      return left.vehicle.vehicleCode.localeCompare(right.vehicle.vehicleCode);
-    }
+  return records
+    .filter((record) => recordMatchesFilters(record, filters))
+    .sort((left, right) => {
+      if (left.vehicle.vehicleCode !== right.vehicle.vehicleCode) {
+        return left.vehicle.vehicleCode.localeCompare(right.vehicle.vehicleCode);
+      }
 
-    if (left.businessDate !== right.businessDate) {
-      return left.businessDate.localeCompare(right.businessDate);
-    }
+      if (left.businessDate !== right.businessDate) {
+        return left.businessDate.localeCompare(right.businessDate);
+      }
 
-    return left.createdAt.getTime() - right.createdAt.getTime();
-  });
+      return left.createdAt.getTime() - right.createdAt.getTime();
+    });
 }
 
 function readCookie(request, name) {
@@ -313,6 +374,10 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
 
       if (newPassword === currentPassword) {
         return response.status(400).json({ message: "新密码不能与当前密码相同" });
+      }
+
+      if (!isComplexPassword(newPassword)) {
+        return response.status(400).json({ message: "新密码需至少 6 位且同时包含字母和数字" });
       }
 
       const isValidCurrentPassword = await bcrypt.compare(
@@ -613,8 +678,8 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
     "/api/records",
     requireLogin,
     requireAdmin,
-    asyncHandler(async (_request, response) => {
-      const records = await loadManagedRecords(prisma);
+    asyncHandler(async (request, response) => {
+      const records = await loadManagedRecords(prisma, readRecordFilters(request));
 
       return response.json({ records: records.map(toManagedRecord) });
     })
@@ -624,8 +689,8 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
     "/api/records/export",
     requireLogin,
     requireAdmin,
-    asyncHandler(async (_request, response) => {
-      const records = await loadManagedRecords(prisma);
+    asyncHandler(async (request, response) => {
+      const records = await loadManagedRecords(prisma, readRecordFilters(request));
       const rows = [
         recordExportHeaders,
         ...records.map((record) => [
@@ -705,6 +770,10 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
         return response.status(400).json({ message: "起步公里和终点公里必须为非负数字" });
       }
 
+      if (!isValidNonNegativeDecimal(fuelFee) || !isValidNonNegativeDecimal(fuelVolume)) {
+        return response.status(400).json({ message: "加油费用和加油数量必须为非负数字" });
+      }
+
       if (endMileage < startMileage) {
         return response.status(400).json({ message: "终点公里不能小于起步公里" });
       }
@@ -745,6 +814,49 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
       return response.status(201).json({
         message: "登记已提交",
         record: toPublicRecord(record)
+      });
+    })
+  );
+
+  app.post(
+    "/api/records/batch-delete",
+    requireLogin,
+    requireAdmin,
+    asyncHandler(async (request, response) => {
+      const ids = Array.isArray(request.body.ids)
+        ? [...new Set(request.body.ids.map((value) => String(value ?? "").trim()).filter(Boolean))]
+        : [];
+
+      if (ids.length === 0) {
+        return response.status(400).json({ message: "请选择至少一条记录" });
+      }
+
+      const existingRecords = await prisma.vehicleUseRecord.findMany({
+        where: {
+          id: {
+            in: ids
+          }
+        },
+        select: {
+          id: true
+        }
+      });
+
+      if (existingRecords.length !== ids.length) {
+        return response.status(404).json({ message: "记录不存在" });
+      }
+
+      await prisma.vehicleUseRecord.deleteMany({
+        where: {
+          id: {
+            in: ids
+          }
+        }
+      });
+
+      return response.json({
+        message: `已删除 ${ids.length} 条记录`,
+        deletedCount: ids.length
       });
     })
   );

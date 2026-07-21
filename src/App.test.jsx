@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App.jsx";
 
+const NativeURL = globalThis.URL;
+
 function mockFetch(responseFactory) {
   const fetchMock = vi.fn(responseFactory);
   vi.stubGlobal("fetch", fetchMock);
@@ -32,6 +34,39 @@ function failJson(status, body) {
     ok: false,
     status,
     json: () => Promise.resolve(body)
+  });
+}
+
+function parseMockUrl(url) {
+  return new NativeURL(url, "http://localhost");
+}
+
+function filterRecords(records, filters) {
+  const keyword = String(filters.keyword ?? "").trim().toLowerCase();
+
+  return records.filter((record) => {
+    const matchesKeyword = keyword
+      ? [
+          record.reason,
+          record.route,
+          record.vehicleCode,
+          record.plateNumber,
+          record.registrantUsername,
+          record.driverSignature,
+          record.remark ?? ""
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(keyword)
+      : true;
+
+    const matchesVehicle = filters.vehicleCode ? record.vehicleCode === filters.vehicleCode : true;
+    const matchesUser = filters.registrantUsername
+      ? record.registrantUsername === filters.registrantUsername
+      : true;
+    const matchesDate = filters.businessDate ? record.businessDate === filters.businessDate : true;
+
+    return matchesKeyword && matchesVehicle && matchesUser && matchesDate;
   });
 }
 
@@ -64,21 +99,23 @@ function mockUserManagementFetch(
   let vehicles = [...initialVehicles];
 
   return mockFetch((url, options = {}) => {
+    const requestUrl = parseMockUrl(url);
+    const pathname = requestUrl.pathname;
     const method = options.method ?? "GET";
 
-    if (url === "/api/login") {
+    if (pathname === "/api/login") {
       return okJson({ user: loginUser });
     }
 
-    if (url === "/api/users" && method === "GET") {
+    if (pathname === "/api/users" && method === "GET") {
       return okJson({ users });
     }
 
-    if (url === "/api/vehicles" && method === "GET") {
+    if (pathname === "/api/vehicles" && method === "GET") {
       return okJson({ vehicles });
     }
 
-    if (url === "/api/users" && method === "POST") {
+    if (pathname === "/api/users" && method === "POST") {
       const body = JSON.parse(options.body);
       if (users.some((existingUser) => existingUser.username === body.username)) {
         return failJson(409, { message: "账号已存在" });
@@ -93,8 +130,8 @@ function mockUserManagementFetch(
       return okJson({ user: createdUser });
     }
 
-    if (url.startsWith("/api/users/") && url.endsWith("/reset-password")) {
-      const id = url.split("/").at(-2);
+    if (pathname.startsWith("/api/users/") && pathname.endsWith("/reset-password")) {
+      const id = pathname.split("/").at(-2);
       const target = users.find((user) => user.id === id);
 
       if (
@@ -107,8 +144,8 @@ function mockUserManagementFetch(
       return okJson({ message: "密码已重置" });
     }
 
-    if (url.startsWith("/api/users/") && method === "DELETE") {
-      const id = url.split("/").at(-1);
+    if (pathname.startsWith("/api/users/") && method === "DELETE") {
+      const id = pathname.split("/").at(-1);
       const deletingUser = users.find((existingUser) => existingUser.id === id);
 
       if (deletingUser?.username === loginUser.username && loginUser.username !== "admin") {
@@ -123,7 +160,7 @@ function mockUserManagementFetch(
       });
     }
 
-    if (url === "/api/vehicles" && method === "POST") {
+    if (pathname === "/api/vehicles" && method === "POST") {
       const body = JSON.parse(options.body);
       if (vehicles.some((existingVehicle) => existingVehicle.vehicleCode === body.vehicleCode)) {
         return failJson(409, { message: "车辆编号已存在" });
@@ -142,8 +179,8 @@ function mockUserManagementFetch(
       return okJson({ vehicle: createdVehicle });
     }
 
-    if (url.startsWith("/api/vehicles/") && method === "DELETE") {
-      const id = url.split("/").at(-1);
+    if (pathname.startsWith("/api/vehicles/") && method === "DELETE") {
+      const id = pathname.split("/").at(-1);
       vehicles = vehicles.filter((existingVehicle) => existingVehicle.id !== id);
       return Promise.resolve({
         ok: true,
@@ -166,20 +203,26 @@ function mockRegistryFetch({
   const records = [];
 
   const fetchMock = mockFetch((url, options = {}) => {
+    const requestUrl = parseMockUrl(url);
+    const pathname = requestUrl.pathname;
     const method = options.method ?? "GET";
 
-    if (url === "/api/login") {
+    if (pathname === "/api/login") {
       return okJson({ user: loginUser });
     }
 
-    if (url === "/api/vehicles" && method === "GET") {
+    if (pathname === "/api/vehicles" && method === "GET") {
       return okJson({
         vehicles: vehicles.filter((vehicle) => !vehicle.isDeleted)
       });
     }
 
-    if (url.startsWith("/api/vehicles/") && url.endsWith("/latest-mileage") && method === "GET") {
-      const parts = url.split("/");
+    if (
+      pathname.startsWith("/api/vehicles/") &&
+      pathname.endsWith("/latest-mileage") &&
+      method === "GET"
+    ) {
+      const parts = pathname.split("/");
       const vehicleId = parts.at(-2);
       const vehicle = vehicles.find((item) => item.id === vehicleId && !item.isDeleted);
 
@@ -192,7 +235,7 @@ function mockRegistryFetch({
       });
     }
 
-    if (url === "/api/records" && method === "POST") {
+    if (pathname === "/api/records" && method === "POST") {
       if (submitErrorMessage) {
         return failJson(400, { message: submitErrorMessage });
       }
@@ -275,39 +318,69 @@ function mockAdminRecordManagementFetch({
   let mileageByVehicleId = { ...latestMileageByVehicleId };
 
   return mockFetch((url, options = {}) => {
+    const requestUrl = parseMockUrl(url);
+    const pathname = requestUrl.pathname;
     const method = options.method ?? "GET";
 
-    if (url === "/api/login") {
+    if (pathname === "/api/login") {
       return okJson({ user: loginUser });
     }
 
-    if (url === "/api/users" && method === "GET") {
+    if (pathname === "/api/users" && method === "GET") {
       return okJson({ users: nextUsers });
     }
 
-    if (url === "/api/vehicles" && method === "GET") {
+    if (pathname === "/api/vehicles" && method === "GET") {
       return okJson({ vehicles: nextVehicles.filter((vehicle) => !vehicle.isDeleted) });
     }
 
-    if (url.startsWith("/api/vehicles/") && url.endsWith("/latest-mileage") && method === "GET") {
-      const vehicleId = url.split("/").at(-2);
+    if (
+      pathname.startsWith("/api/vehicles/") &&
+      pathname.endsWith("/latest-mileage") &&
+      method === "GET"
+    ) {
+      const vehicleId = pathname.split("/").at(-2);
       return okJson({
         startMileage: Object.hasOwn(mileageByVehicleId, vehicleId) ? mileageByVehicleId[vehicleId] : null
       });
     }
 
-    if (url === "/api/records" && method === "GET") {
+    if (pathname === "/api/records" && method === "GET") {
+      const filters = {
+        keyword: requestUrl.searchParams.get("keyword") ?? "",
+        vehicleCode: requestUrl.searchParams.get("vehicleCode") ?? "",
+        registrantUsername: requestUrl.searchParams.get("registrantUsername") ?? "",
+        businessDate: requestUrl.searchParams.get("businessDate") ?? ""
+      };
+
       return okJson({
-        records: nextRecords
+        records: filterRecords(nextRecords, filters)
       });
     }
 
-    if (url === "/api/records/export" && method === "GET") {
+    if (pathname === "/api/records/export" && method === "GET") {
       return okBlob(exportBlob);
     }
 
-    if (url.startsWith("/api/records/") && method === "DELETE") {
-      const id = url.split("/").at(-1);
+    if (pathname === "/api/records/batch-delete" && method === "POST") {
+      const body = JSON.parse(options.body);
+      const ids = Array.isArray(body.ids) ? body.ids : [];
+
+      if (ids.length === 0) {
+        return failJson(400, { message: "请选择至少一条记录" });
+      }
+
+      const existingIds = new Set(nextRecords.map((record) => record.id));
+      if (ids.some((id) => !existingIds.has(id))) {
+        return failJson(404, { message: "记录不存在" });
+      }
+
+      nextRecords = nextRecords.filter((record) => !ids.includes(record.id));
+      return okJson({ message: `已删除 ${ids.length} 条记录`, deletedCount: ids.length });
+    }
+
+    if (pathname.startsWith("/api/records/") && method === "DELETE") {
+      const id = pathname.split("/").at(-1);
       const deletedRecord = nextRecords.find((record) => record.id === id);
       nextRecords = nextRecords.filter((record) => record.id !== id);
       if (deletedRecord) {
@@ -344,6 +417,21 @@ describe("Issue 1 authentication UI", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(screen.getByText("账号必填")).toBeInTheDocument();
     expect(screen.getByText("密码必填")).toBeInTheDocument();
+  });
+
+  it("toggles password visibility on the login form", async () => {
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    const passwordInput = screen.getByLabelText("密码");
+    expect(passwordInput).toHaveAttribute("type", "password");
+
+    await user.click(screen.getByRole("button", { name: "显示密码" }));
+    expect(passwordInput).toHaveAttribute("type", "text");
+
+    await user.click(screen.getByRole("button", { name: "隐藏密码" }));
+    expect(passwordInput).toHaveAttribute("type", "password");
   });
 
   it("shows the management entry after an administrator logs in", async () => {
@@ -426,6 +514,25 @@ describe("Issue 1 authentication UI", () => {
     expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
   });
 
+  it("blocks weak self-service passwords for employees before submitting", async () => {
+    const fetchMock = mockFetch(() => okJson({ user: { username: "employee", role: "employee" } }));
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.type(screen.getByLabelText("账号"), "employee");
+    await user.type(screen.getByLabelText("密码"), "Employee001");
+    await user.click(screen.getByRole("button", { name: "登录" }));
+    await user.click(await screen.findByRole("button", { name: "修改密码" }));
+    await user.type(screen.getByLabelText("当前密码"), "Employee001");
+    await user.type(screen.getByLabelText("新密码"), "abcdef");
+    await user.type(screen.getByLabelText("确认新密码"), "abcdef");
+    await user.click(screen.getByRole("button", { name: "提交修改" }));
+
+    expect(screen.getByText("新密码需至少 6 位且同时包含字母和数字")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("lets an administrator change the password from the admin home module", async () => {
     const fetchMock = mockFetch((url) => {
       if (url === "/api/login") {
@@ -453,6 +560,31 @@ describe("Issue 1 authentication UI", () => {
     expect(await screen.findByText("密码已修改，请重新登录")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
   });
+
+  it("blocks weak self-service passwords for administrators before submitting", async () => {
+    const fetchMock = mockFetch((url) => {
+      if (url === "/api/login") {
+        return okJson({ user: { username: "admin", role: "admin" } });
+      }
+
+      return okJson({ message: "密码已修改，请重新登录" });
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.type(screen.getByLabelText("账号"), "admin");
+    await user.type(screen.getByLabelText("密码"), "admin");
+    await user.click(screen.getByRole("button", { name: "登录" }));
+    await user.click(await screen.findByRole("button", { name: "修改密码" }));
+    await user.type(screen.getByLabelText("当前密码"), "admin");
+    await user.type(screen.getByLabelText("新密码"), "123456");
+    await user.type(screen.getByLabelText("确认新密码"), "123456");
+    await user.click(screen.getByRole("button", { name: "提交修改" }));
+
+    expect(screen.getByText("新密码需至少 6 位且同时包含字母和数字")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("Issue 2 user management UI", () => {
@@ -475,7 +607,7 @@ describe("Issue 2 user management UI", () => {
     await user.click(await screen.findByRole("button", { name: "用户账号管理" }));
   }
 
-  it("lets an administrator open user management and create an employee", async () => {
+  it("lets an administrator create an employee with a weak password and toggle visibility", async () => {
     mockUserManagementFetch([
       { id: "admin-id", username: "admin", role: "admin", isBuiltinAdmin: true }
     ]);
@@ -487,8 +619,15 @@ describe("Issue 2 user management UI", () => {
 
     expect(screen.getByRole("heading", { name: "新增用户" })).toBeInTheDocument();
 
+    const passwordInput = screen.getByLabelText("初始密码");
+    expect(passwordInput).toHaveAttribute("type", "password");
+    await user.click(screen.getByRole("button", { name: "显示初始密码" }));
+    expect(passwordInput).toHaveAttribute("type", "text");
+    await user.click(screen.getByRole("button", { name: "隐藏初始密码" }));
+    expect(passwordInput).toHaveAttribute("type", "password");
+
     await user.type(screen.getByLabelText("新账号"), "new_employee");
-    await user.type(screen.getByLabelText("初始密码"), "NewEmployee001");
+    await user.type(screen.getByLabelText("初始密码"), "123");
     await user.selectOptions(screen.getByLabelText("角色"), "employee");
     await user.click(screen.getByRole("button", { name: "提交新增" }));
 
@@ -563,7 +702,7 @@ describe("Issue 2 user management UI", () => {
     expect(screen.queryByText("cancel_user")).not.toBeInTheDocument();
   });
 
-  it("lets an administrator reset an employee password but hides reset actions for admin accounts", async () => {
+  it("lets an administrator reset an employee password with a weak value and hides reset actions for admin accounts", async () => {
     mockUserManagementFetch([
       { id: "admin-id", username: "admin", role: "admin", isBuiltinAdmin: true },
       { id: "manager-id", username: "manager", role: "admin", isBuiltinAdmin: false },
@@ -578,8 +717,14 @@ describe("Issue 2 user management UI", () => {
     expect(screen.getByRole("button", { name: "重置密码 manager" })).toBeInTheDocument();
 
     await user.click(await screen.findByRole("button", { name: "重置密码 reset_user" }));
-    await user.type(screen.getByLabelText("重置新密码"), "ResetUser001");
-    await user.type(screen.getByLabelText("确认重置密码"), "ResetUser001");
+    const resetInput = screen.getByLabelText("重置新密码");
+    expect(resetInput).toHaveAttribute("type", "password");
+    await user.click(screen.getByRole("button", { name: "显示重置新密码" }));
+    expect(resetInput).toHaveAttribute("type", "text");
+    await user.click(screen.getByRole("button", { name: "隐藏重置新密码" }));
+    expect(resetInput).toHaveAttribute("type", "password");
+    await user.type(resetInput, "abc");
+    await user.type(screen.getByLabelText("确认重置密码"), "abc");
     await user.click(screen.getByRole("button", { name: "提交重置" }));
 
     expect(await screen.findByText("密码已重置")).toBeInTheDocument();
@@ -930,6 +1075,40 @@ describe("Issue 4 registry UI", () => {
     expect(screen.getByLabelText("出车时间")).toHaveValue("");
     expect(screen.getByLabelText("还车时间")).toHaveValue("");
   });
+
+  it("shows fuel units and uses numeric fields for fuel inputs", async () => {
+    mockRegistryFetch({
+      vehicles: [
+        {
+          id: "vehicle-1",
+          vehicleCode: "CAR-001",
+          plateNumber: "沪A-10001",
+          brandModel: "大众帕萨特",
+          isDeleted: false
+        }
+      ],
+      latestMileageByVehicleId: {
+        "vehicle-1": 1000
+      }
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+    await loginAsEmployee(user);
+    await screen.findByLabelText("起步公里读数");
+
+    const fuelFeeInput = screen.getByLabelText("加油费用（元）");
+    const fuelVolumeInput = screen.getByLabelText("加油数量（升）");
+
+    expect(fuelFeeInput).toHaveAttribute("type", "number");
+    expect(fuelVolumeInput).toHaveAttribute("type", "number");
+
+    await user.type(fuelFeeInput, "15.5");
+    await user.type(fuelVolumeInput, "20.3");
+
+    expect(fuelFeeInput).toHaveValue(15.5);
+    expect(fuelVolumeInput).toHaveValue(20.3);
+  });
 });
 
 describe("Issue 5 record management UI", () => {
@@ -997,6 +1176,7 @@ describe("Issue 5 record management UI", () => {
 
     expect(within(recordSection).getByText("REC-001")).toBeInTheDocument();
     expect(within(recordSection).getByText("登记人：admin")).toBeInTheDocument();
+    expect(within(recordSection).getByText("加油：0元/0L")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /编辑/ })).not.toBeInTheDocument();
   });
 
@@ -1203,8 +1383,111 @@ describe("Issue 5 record management UI", () => {
     expect(screen.queryByText("REC-DELETE")).not.toBeInTheDocument();
   });
 
-  it("downloads an xlsx file when the administrator exports records", async () => {
+  it("supports selecting filtered records for batch deletion and clears selection when filters change", async () => {
     mockAdminRecordManagementFetch({
+      users: [{ id: "admin-id", username: "admin", role: "admin", isBuiltinAdmin: true }],
+      records: [
+        {
+          id: "record-a",
+          vehicleId: "vehicle-1",
+          vehicleCode: "CAR-001",
+          plateNumber: "沪A-10001",
+          registrantUsername: "employee",
+          businessDate: "2026-07-20",
+          departureTime: "09:00",
+          returnTime: "10:00",
+          startMileage: 1000,
+          endMileage: 1100,
+          distance: 100,
+          fuelFee: "15",
+          fuelVolume: "20",
+          driverSignature: "张三",
+          remark: "",
+          reason: "BULK-A",
+          route: "A",
+          isCrossDay: false,
+          createdAt: "2026-07-20T10:00:00.000Z"
+        },
+        {
+          id: "record-b",
+          vehicleId: "vehicle-1",
+          vehicleCode: "CAR-001",
+          plateNumber: "沪A-10001",
+          registrantUsername: "employee",
+          businessDate: "2026-07-20",
+          departureTime: "10:00",
+          returnTime: "11:00",
+          startMileage: 1100,
+          endMileage: 1200,
+          distance: 100,
+          fuelFee: "0",
+          fuelVolume: "0",
+          driverSignature: "李四",
+          remark: "",
+          reason: "BULK-B",
+          route: "B",
+          isCrossDay: false,
+          createdAt: "2026-07-20T11:00:00.000Z"
+        },
+        {
+          id: "record-c",
+          vehicleId: "vehicle-2",
+          vehicleCode: "CAR-002",
+          plateNumber: "沪A-10002",
+          registrantUsername: "admin",
+          businessDate: "2026-07-21",
+          departureTime: "12:00",
+          returnTime: "13:00",
+          startMileage: 500,
+          endMileage: 580,
+          distance: 80,
+          fuelFee: "8",
+          fuelVolume: "12",
+          driverSignature: "王五",
+          remark: "",
+          reason: "OTHER",
+          route: "C",
+          isCrossDay: false,
+          createdAt: "2026-07-21T13:00:00.000Z"
+        }
+      ]
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+    await loginAsAdminAndOpenRecords(user);
+
+    const recordSection = screen.getByRole("region", { name: "用车记录管理" });
+    await user.type(within(recordSection).getByLabelText("搜索记录"), "BULK");
+
+    await user.click(within(recordSection).getByRole("button", { name: "全选当前筛选结果" }));
+    expect(within(recordSection).getByText("已选 2 条")).toBeInTheDocument();
+
+    await user.click(within(recordSection).getByRole("button", { name: "批量删除" }));
+    expect(screen.getByText("确认删除已选 2 条记录？")).toBeInTheDocument();
+
+    fireEvent.change(within(recordSection).getByLabelText("按日期筛选"), {
+      target: { value: "2026-07-21" }
+    });
+    expect(within(recordSection).getByText("已选 0 条")).toBeInTheDocument();
+    expect(screen.queryByText("确认删除已选 2 条记录？")).not.toBeInTheDocument();
+
+    await user.clear(within(recordSection).getByLabelText("搜索记录"));
+    fireEvent.change(within(recordSection).getByLabelText("按日期筛选"), {
+      target: { value: "" }
+    });
+    await user.click(within(recordSection).getByRole("button", { name: "全选当前筛选结果" }));
+    await user.click(within(recordSection).getByRole("button", { name: "批量删除" }));
+    await user.click(screen.getByRole("button", { name: "确认批量删除" }));
+
+    expect(await screen.findByText("已删除 3 条记录")).toBeInTheDocument();
+    expect(screen.queryByText("BULK-A")).not.toBeInTheDocument();
+    expect(screen.queryByText("BULK-B")).not.toBeInTheDocument();
+    expect(screen.queryByText("OTHER")).not.toBeInTheDocument();
+  });
+
+  it("downloads an xlsx file using the current record filters", async () => {
+    const fetchMock = mockAdminRecordManagementFetch({
       users: [{ id: "admin-id", username: "admin", role: "admin", isBuiltinAdmin: true }],
       records: [
         {
@@ -1242,9 +1525,21 @@ describe("Issue 5 record management UI", () => {
 
     render(<App />);
     await loginAsAdminAndOpenRecords(user);
+    await user.type(screen.getByLabelText("搜索记录"), "REC-001");
+    await user.selectOptions(screen.getByLabelText("按车辆筛选"), "CAR-001");
+    fireEvent.change(screen.getByLabelText("按日期筛选"), {
+      target: { value: "2026-07-20" }
+    });
     await user.click(await screen.findByRole("button", { name: "导出 Excel" }));
 
     expect(await screen.findByText("Excel 已导出")).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(
+        ([url]) =>
+          url ===
+          "/api/records/export?keyword=REC-001&vehicleCode=CAR-001&registrantUsername=&businessDate=2026-07-20"
+      )
+    ).toBe(true);
     expect(createObjectUrlSpy).toHaveBeenCalledTimes(1);
     expect(clickSpy).toHaveBeenCalledTimes(1);
     expect(revokeObjectUrlSpy).toHaveBeenCalledWith("blob:records");

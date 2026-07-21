@@ -212,6 +212,32 @@ describe("Issue 1 authentication API", () => {
     expect(samePassword.body).toEqual({ message: "新密码不能与当前密码相同" });
   });
 
+  it("rejects self-service passwords that do not contain both letters and numbers", async () => {
+    const employeeAgent = request.agent(app);
+    await employeeAgent.post("/api/login").send({ username: "employee", password: "Employee001" }).expect(200);
+
+    const employeeWeak = await employeeAgent.post("/api/change-password").send({
+      currentPassword: "Employee001",
+      newPassword: "123456",
+      confirmPassword: "123456"
+    });
+
+    expect(employeeWeak.status).toBe(400);
+    expect(employeeWeak.body).toEqual({ message: "新密码需至少 6 位且同时包含字母和数字" });
+
+    const adminAgent = request.agent(app);
+    await adminAgent.post("/api/login").send({ username: "admin", password: "admin" }).expect(200);
+
+    const adminWeak = await adminAgent.post("/api/change-password").send({
+      currentPassword: "admin",
+      newPassword: "abcdef",
+      confirmPassword: "abcdef"
+    });
+
+    expect(adminWeak.status).toBe(400);
+    expect(adminWeak.body).toEqual({ message: "新密码需至少 6 位且同时包含字母和数字" });
+  });
+
   it("allows an administrator to change only their own password through the self-service endpoint", async () => {
     const agent = request.agent(app);
 
