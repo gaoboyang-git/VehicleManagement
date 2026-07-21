@@ -404,6 +404,7 @@ describe("Issue 1 authentication UI", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("does not submit login when username and password are blank", async () => {
@@ -1076,6 +1077,43 @@ describe("Issue 4 registry UI", () => {
     expect(screen.getByLabelText("还车时间")).toHaveValue("");
   });
 
+  it("blocks submits when the return time is earlier than the departure time", async () => {
+    const { fetchMock } = mockRegistryFetch({
+      vehicles: [
+        {
+          id: "vehicle-1",
+          vehicleCode: "CAR-001",
+          plateNumber: "沪A-10001",
+          brandModel: "大众帕萨特",
+          isDeleted: false
+        }
+      ],
+      latestMileageByVehicleId: {
+        "vehicle-1": 1000
+      }
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+    await loginAsEmployee(user);
+    await screen.findByLabelText("起步公里读数");
+
+    setDateTimeValue("testid:registry-departure-time", "2026-07-20T10:30");
+    setDateTimeValue("testid:registry-return-time", "2026-07-20T09:00");
+    await user.type(screen.getByLabelText("事由"), "调度");
+    await user.type(screen.getByLabelText("目的地及行车路线"), "园区-政务大厅");
+    await user.type(screen.getByLabelText("终点公里读数"), "1100");
+    await user.type(screen.getByLabelText("驾驶员签字"), "张三");
+    await user.click(screen.getByRole("button", { name: "提交登记" }));
+
+    expect((await screen.findAllByText("还车时间不能小于出车时间")).length).toBeGreaterThan(0);
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, options]) => url === "/api/records" && options?.method === "POST"
+      )
+    ).toBe(false);
+  });
+
   it("shows fuel units and uses numeric fields for fuel inputs", async () => {
     mockRegistryFetch({
       vehicles: [
@@ -1542,6 +1580,7 @@ describe("Issue 5 record management UI", () => {
     ).toBe(true);
     expect(createObjectUrlSpy).toHaveBeenCalledTimes(1);
     expect(clickSpy).toHaveBeenCalledTimes(1);
+    expect(clickSpy.mock.instances[0].download).toMatch(/^用车记录-\d{4}年\d{2}月\d{2}日\.xlsx$/);
     expect(revokeObjectUrlSpy).toHaveBeenCalledWith("blob:records");
   });
 });

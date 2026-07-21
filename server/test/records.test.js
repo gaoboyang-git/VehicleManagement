@@ -284,7 +284,7 @@ describe("Issue 4 registry API", () => {
     );
   });
 
-  it("lets an administrator submit a cross-day registry record", async () => {
+  it("lets an administrator submit a cross-day registry record with explicit next-day datetime values", async () => {
     const admin = await prisma.user.findUnique({
       where: {
         username: "admin"
@@ -300,8 +300,8 @@ describe("Issue 4 registry API", () => {
     const response = await agent.post("/api/records").send({
       vehicleId: vehicle.id,
       businessDate: "2026-07-20",
-      departureTime: "23:00",
-      returnTime: "01:00",
+      departureTime: "2026-07-20T23:00",
+      returnTime: "2026-07-21T01:00",
       reason: "夜间值班",
       route: "园区-值班点",
       startMileage: 1500,
@@ -323,6 +323,8 @@ describe("Issue 4 registry API", () => {
         isCrossDay: true
       })
     );
+    expect(storedRecord.departureTime).toBe("23:00");
+    expect(storedRecord.returnTime).toBe("01:00");
     expect(storedRecord.isCrossDay).toBe(true);
   });
 
@@ -387,6 +389,31 @@ describe("Issue 4 registry API", () => {
 
     expect(response.status).toBe(400);
     expect(response.body).toEqual({ message: "终点公里不能小于起步公里" });
+    expect(await prisma.vehicleUseRecord.count()).toBe(0);
+  });
+
+  it("rejects records when the return time is earlier than the departure time", async () => {
+    const vehicle = await createVehicle(prisma, {
+      vehicleCode: "CAR-001",
+      plateNumber: "沪A-10001",
+      brandModel: "大众帕萨特"
+    });
+    const agent = await employeeAgent();
+
+    const response = await agent.post("/api/records").send({
+      vehicleId: vehicle.id,
+      businessDate: "2026-07-20",
+      departureTime: "2026-07-20T10:00",
+      returnTime: "2026-07-20T09:00",
+      reason: "外出办事",
+      route: "园区-政务大厅",
+      startMileage: 1000,
+      endMileage: 1100,
+      driverSignature: "张三"
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ message: "还车时间不能小于出车时间" });
     expect(await prisma.vehicleUseRecord.count()).toBe(0);
   });
 
@@ -949,28 +976,23 @@ describe("Issue 4 registry API", () => {
     );
     expect(response.headers["content-disposition"]).toContain("attachment");
     expect(rows[0]).toEqual([
-      "车辆编号",
-      "车牌号",
-      "登记人账号",
-      "事由",
-      "路线",
-      "业务日期",
+      "日期",
       "出车时间",
       "还车时间",
-      "起步公里",
-      "终点公里",
-      "行车公里",
-      "是否跨天",
-      "加油费用",
-      "加油数量",
-      "驾驶员",
+      "事由",
+      "目的地及行车路线",
+      "起步公里读数",
+      "终点公里读数",
+      "行车公里数",
+      "加油费用/数量",
+      "驾驶员签字",
       "备注"
     ]);
     expect(rows.slice(1).map((row) => row[0])).toEqual([
-      "CAR-001",
-      "CAR-001",
-      "CAR-002",
-      "CAR-003"
+      "2026-07-19",
+      "2026-07-20",
+      "2026-07-20",
+      "2026-07-20"
     ]);
     expect(rows.slice(1).map((row) => row[3])).toEqual([
       "REC-A-OLD",
@@ -1036,8 +1058,7 @@ describe("Issue 4 registry API", () => {
 
     expect(response.status).toBe(200);
     expect(rows).toHaveLength(2);
-    expect(rows[1][0]).toBe("CAR-001");
-    expect(rows[1][2]).toBe("admin");
+    expect(rows[1][0]).toBe("2026-07-21");
     expect(rows[1][3]).toBe("EXPORT-MATCH");
   });
 
@@ -1057,21 +1078,16 @@ describe("Issue 4 registry API", () => {
     expect(response.status).toBe(200);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toEqual([
-      "车辆编号",
-      "车牌号",
-      "登记人账号",
-      "事由",
-      "路线",
-      "业务日期",
+      "日期",
       "出车时间",
       "还车时间",
-      "起步公里",
-      "终点公里",
-      "行车公里",
-      "是否跨天",
-      "加油费用",
-      "加油数量",
-      "驾驶员",
+      "事由",
+      "目的地及行车路线",
+      "起步公里读数",
+      "终点公里读数",
+      "行车公里数",
+      "加油费用/数量",
+      "驾驶员签字",
       "备注"
     ]);
   });

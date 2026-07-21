@@ -76,6 +76,24 @@ function extractTimePart(value) {
   return text.includes("T") ? text.slice(11, 16) : text;
 }
 
+function isReturnEarlierThanDeparture(departureValue, returnValue) {
+  const departureText = String(departureValue ?? "").trim();
+  const returnText = String(returnValue ?? "").trim();
+
+  if (!departureText || !returnText) {
+    return false;
+  }
+
+  const hasDepartureDate = departureText.includes("T");
+  const hasReturnDate = returnText.includes("T");
+
+  if (hasDepartureDate && hasReturnDate) {
+    return returnText < departureText;
+  }
+
+  return extractTimePart(returnText) < extractTimePart(departureText);
+}
+
 function summarizeRecord(record) {
   return `${record.vehicleCode} / ${record.businessDate} / ${record.registrantUsername} / ${record.reason}`;
 }
@@ -127,6 +145,13 @@ function buildRecordQueryString(filters) {
   params.set("registrantUsername", String(filters.registrantUsername ?? ""));
   params.set("businessDate", String(filters.businessDate ?? ""));
   return params.toString();
+}
+
+function formatExportFileName(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `用车记录-${year}年${month}月${day}日.xlsx`;
 }
 
 function PasswordField({
@@ -426,7 +451,7 @@ export function App() {
     const downloadUrl = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = downloadUrl;
-    link.download = "vehicle-records.xlsx";
+    link.download = formatExportFileName();
     link.click();
     URL.revokeObjectURL(downloadUrl);
     setUserManagementMessage("Excel 已导出");
@@ -928,6 +953,15 @@ export function App() {
       return;
     }
 
+    if (isReturnEarlierThanDeparture(registryForm.departureTime, registryForm.returnTime)) {
+      setRegistryErrors((current) => ({
+        ...current,
+        returnTime: "还车时间不能小于出车时间"
+      }));
+      setRegistryMessage("还车时间不能小于出车时间");
+      return;
+    }
+
     const response = await fetch("/api/records", {
       method: "POST",
       credentials: "include",
@@ -1291,7 +1325,6 @@ export function App() {
         <div>
           <p className="eyebrow">管理工作台</p>
           <h1>管理员管理工作台</h1>
-          <p className="lede">请选择要进入的管理模块。管理员登录后不再进入公务车登记表单。</p>
         </div>
 
         <div className="identity-card" aria-label="当前登录信息">

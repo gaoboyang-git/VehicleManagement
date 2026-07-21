@@ -103,22 +103,56 @@ function readDateTimeParts(value) {
   };
 }
 
+function isReturnEarlierThanDeparture(departureValue, returnValue) {
+  const departureText = String(departureValue ?? "").trim();
+  const returnText = String(returnValue ?? "").trim();
+
+  if (!departureText || !returnText) {
+    return false;
+  }
+
+  if (
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(departureText) &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(returnText)
+  ) {
+    return returnText < departureText;
+  }
+
+  const departureTime = departureText.includes("T") ? departureText.slice(11, 16) : departureText;
+  const returnTime = returnText.includes("T") ? returnText.slice(11, 16) : returnText;
+
+  return returnTime < departureTime;
+}
+
+function formatFuelExportValue(fuelFee, fuelVolume) {
+  const feeText = String(fuelFee ?? "").trim();
+  const volumeText = String(fuelVolume ?? "").trim();
+
+  if (!feeText && !volumeText) {
+    return "";
+  }
+
+  return `${feeText ? `${feeText}元` : "-"}/${volumeText ? `${volumeText}L` : "-"}`;
+}
+
+function formatExportFileName(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `用车记录-${year}年${month}月${day}日.xlsx`;
+}
+
 const recordExportHeaders = [
-  "车辆编号",
-  "车牌号",
-  "登记人账号",
-  "事由",
-  "路线",
-  "业务日期",
+  "日期",
   "出车时间",
   "还车时间",
-  "起步公里",
-  "终点公里",
-  "行车公里",
-  "是否跨天",
-  "加油费用",
-  "加油数量",
-  "驾驶员",
+  "事由",
+  "目的地及行车路线",
+  "起步公里读数",
+  "终点公里读数",
+  "行车公里数",
+  "加油费用/数量",
+  "驾驶员签字",
   "备注"
 ];
 
@@ -694,20 +728,15 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
       const rows = [
         recordExportHeaders,
         ...records.map((record) => [
-          record.vehicle.vehicleCode,
-          record.vehicle.plateNumber,
-          record.user.username,
-          record.reason,
-          record.route,
           record.businessDate,
           record.departureTime,
           record.returnTime,
+          record.reason,
+          record.route,
           record.startMileage,
           record.endMileage,
           record.distance,
-          record.isCrossDay ? "是" : "否",
-          record.fuelFee ?? "",
-          record.fuelVolume ?? "",
+          formatFuelExportValue(record.fuelFee, record.fuelVolume),
           record.driverSignature,
           record.remark ?? ""
         ])
@@ -726,7 +755,11 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
         "Content-Type",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
       );
-      response.setHeader("Content-Disposition", 'attachment; filename="vehicle-records.xlsx"');
+      const fileName = formatExportFileName();
+      response.setHeader(
+        "Content-Disposition",
+        `attachment; filename="vehicle-records.xlsx"; filename*=UTF-8''${encodeURIComponent(fileName)}`
+      );
 
       return response.send(buffer);
     })
@@ -772,6 +805,10 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
 
       if (!isValidNonNegativeDecimal(fuelFee) || !isValidNonNegativeDecimal(fuelVolume)) {
         return response.status(400).json({ message: "加油费用和加油数量必须为非负数字" });
+      }
+
+      if (isReturnEarlierThanDeparture(request.body.departureTime, request.body.returnTime)) {
+        return response.status(400).json({ message: "还车时间不能小于出车时间" });
       }
 
       if (endMileage < startMileage) {
