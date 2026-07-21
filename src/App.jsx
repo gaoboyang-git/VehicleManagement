@@ -90,6 +90,13 @@ async function readApiMessage(response) {
 }
 
 export function App() {
+  const employeeRegistryView = "employeeRegistry";
+  const adminHomeView = "adminHome";
+  const adminUsersView = "adminUsers";
+  const adminVehiclesView = "adminVehicles";
+  const adminRecordsView = "adminRecords";
+  const adminPasswordView = "adminPassword";
+
   const [user, setUser] = useState(null);
   const [loginForm, setLoginForm] = useState({ username: "", password: "" });
   const [loginErrors, setLoginErrors] = useState({});
@@ -102,7 +109,7 @@ export function App() {
   });
   const [passwordMessage, setPasswordMessage] = useState("");
   const [passwordErrors, setPasswordErrors] = useState({});
-  const [view, setView] = useState("registry");
+  const [view, setView] = useState(employeeRegistryView);
   const [managedUsers, setManagedUsers] = useState([]);
   const [managedRecords, setManagedRecords] = useState([]);
   const [vehicles, setVehicles] = useState([]);
@@ -142,7 +149,7 @@ export function App() {
   });
 
   useEffect(() => {
-    if (!user || !selectedVehicleId) {
+    if (!user || user.role === "admin" || view !== employeeRegistryView || !selectedVehicleId) {
       setRegistryForm(createEmptyRegistryForm());
       return undefined;
     }
@@ -198,6 +205,18 @@ export function App() {
     setIsAddVehicleOpen(false);
     setPendingDeleteVehicle(null);
     setPendingDeleteRecord(null);
+  }
+
+  function resetPasswordModuleState() {
+    setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+    setPasswordErrors({});
+    setPasswordMessage("");
+  }
+
+  function resetAdminModuleState() {
+    closeInlinePanels();
+    setUserManagementMessage("");
+    resetPasswordModuleState();
   }
 
   function updatePasswordField(field, value) {
@@ -379,11 +398,23 @@ export function App() {
     }
 
     const body = await response.json();
-    setUser(body.user);
-    setView("registry");
-    closeInlinePanels();
+    const nextUser = body.user;
+
+    setUser(nextUser);
+    resetAdminModuleState();
     setLoginForm({ username: "", password: "" });
     setRegistryMessage("");
+    setRegistryErrors({});
+
+    if (nextUser.role === "admin") {
+      setView(adminHomeView);
+      setVehicles([]);
+      setSelectedVehicleId("");
+      setRegistryForm(createEmptyRegistryForm());
+      return;
+    }
+
+    setView(employeeRegistryView);
     await loadVehicles({ preserveSelection: false });
   }
 
@@ -393,8 +424,8 @@ export function App() {
       credentials: "include"
     });
     setUser(null);
-    closeInlinePanels();
-    setView("registry");
+    resetAdminModuleState();
+    setView(employeeRegistryView);
     setManagedUsers([]);
     setManagedRecords([]);
     setVehicles([]);
@@ -451,21 +482,18 @@ export function App() {
 
     const message = await readApiMessage(response);
     setUser(null);
-    setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
-    setPasswordErrors({});
-    setIsPasswordDialogOpen(false);
+    setView(employeeRegistryView);
+    resetAdminModuleState();
     setLoginMessage(message);
   }
 
-  async function openUserManagement() {
-    if (view === "users") {
-      setView("registry");
-      closeInlinePanels();
-      setUserManagementMessage("");
-      return;
-    }
+  function openAdminHome() {
+    resetAdminModuleState();
+    setView(adminHomeView);
+  }
 
-    setUserManagementMessage("");
+  async function openAdminUsers() {
+    resetAdminModuleState();
 
     const response = await fetch("/api/users", {
       credentials: "include"
@@ -478,11 +506,37 @@ export function App() {
 
     const body = await response.json();
     setManagedUsers(body.users);
+    setView(adminUsersView);
+  }
+
+  async function openAdminVehicles() {
+    resetAdminModuleState();
+
     await loadVehicles();
-    await loadRecords();
+    setView(adminVehiclesView);
+  }
+
+  async function openAdminRecords() {
+    resetAdminModuleState();
+
+    const response = await fetch("/api/records", {
+      credentials: "include"
+    });
+
+    if (!response.ok) {
+      setUserManagementMessage(await readApiMessage(response));
+      return;
+    }
+
+    const body = await response.json();
+    setManagedRecords(normalizeRecords(body));
     clearRecordFilters();
-    closeInlinePanels();
-    setView("users");
+    setView(adminRecordsView);
+  }
+
+  function openAdminPasswordModule() {
+    resetAdminModuleState();
+    setView(adminPasswordView);
   }
 
   async function handleCreateUser(event) {
@@ -864,13 +918,264 @@ export function App() {
     );
   }
 
+  if (user.role !== "admin") {
+    return (
+      <main className="shell">
+        <section className="panel workspace-panel">
+          <div>
+            <p className="eyebrow">登记工作台</p>
+            <h1>公务用车使用登记</h1>
+            <p className="lede">填写当次用车信息后提交，系统会按车辆独立维护默认起步公里。</p>
+          </div>
+
+          <div className="identity-card" aria-label="当前登录信息">
+            <p>当前用户：{user.username}</p>
+            <p>当前角色：{roleLabels[user.role] ?? user.role}</p>
+          </div>
+
+          <form className="form registry-form" onSubmit={handleRegistrySubmit} noValidate>
+            <label className="field registry-vehicle-field">
+              <span>车辆</span>
+              <select
+                aria-label="车辆"
+                value={selectedVehicleId}
+                onChange={(event) => {
+                  setSelectedVehicleId(event.target.value);
+                  setRegistryMessage("");
+                }}
+              >
+                {vehicles.length === 0 ? <option value="">暂无可用车辆</option> : null}
+                {vehicles.map((vehicle) => (
+                  <option key={vehicle.id} value={vehicle.id}>
+                    {vehicle.vehicleCode} + {vehicle.plateNumber}
+                  </option>
+                ))}
+              </select>
+              {registryErrors.vehicleId ? <small className="error">{registryErrors.vehicleId}</small> : null}
+            </label>
+
+            <div className="field-grid">
+              <label className="field">
+                <span>日期</span>
+                <input
+                  aria-label="日期"
+                  type="date"
+                  value={registryForm.businessDate}
+                  onChange={(event) => updateRegistryField("businessDate", event.target.value)}
+                />
+                {registryErrors.businessDate ? (
+                  <small className="error">{registryErrors.businessDate}</small>
+                ) : null}
+              </label>
+              <label className="field">
+                <span>出车时间</span>
+                <input
+                  aria-label="出车时间"
+                  data-testid="registry-departure-time"
+                  type="datetime-local"
+                  value={registryForm.departureTime}
+                  onChange={(event) => updateRegistryField("departureTime", event.target.value)}
+                />
+                {registryErrors.departureTime ? (
+                  <small className="error">{registryErrors.departureTime}</small>
+                ) : null}
+              </label>
+              <label className="field">
+                <span>还车时间</span>
+                <input
+                  aria-label="还车时间"
+                  data-testid="registry-return-time"
+                  type="datetime-local"
+                  value={registryForm.returnTime}
+                  onChange={(event) => updateRegistryField("returnTime", event.target.value)}
+                />
+                {registryErrors.returnTime ? (
+                  <small className="error">{registryErrors.returnTime}</small>
+                ) : null}
+              </label>
+              <label className="field">
+                <span>事由</span>
+                <input
+                  aria-label="事由"
+                  value={registryForm.reason}
+                  onChange={(event) => updateRegistryField("reason", event.target.value)}
+                />
+                {registryErrors.reason ? <small className="error">{registryErrors.reason}</small> : null}
+              </label>
+              <label className="field field-span-2">
+                <span>目的地及行车路线</span>
+                <input
+                  aria-label="目的地及行车路线"
+                  value={registryForm.route}
+                  onChange={(event) => updateRegistryField("route", event.target.value)}
+                />
+                {registryErrors.route ? <small className="error">{registryErrors.route}</small> : null}
+              </label>
+              <label className="field">
+                <span>起步公里读数</span>
+                <input
+                  aria-label="起步公里读数"
+                  type="number"
+                  min="0"
+                  value={registryForm.startMileage}
+                  onChange={(event) => updateRegistryField("startMileage", event.target.value)}
+                />
+                {registryErrors.startMileage ? (
+                  <small className="error">{registryErrors.startMileage}</small>
+                ) : null}
+              </label>
+              <label className="field">
+                <span>终点公里读数</span>
+                <input
+                  aria-label="终点公里读数"
+                  type="number"
+                  min="0"
+                  value={registryForm.endMileage}
+                  onChange={(event) => updateRegistryField("endMileage", event.target.value)}
+                />
+                {registryErrors.endMileage ? (
+                  <small className="error">{registryErrors.endMileage}</small>
+                ) : null}
+              </label>
+              <label className="field">
+                <span>行车公里数</span>
+                <input aria-label="行车公里数" readOnly type="number" value={registryForm.distance} />
+              </label>
+              <label className="field">
+                <span>驾驶员签字</span>
+                <input
+                  aria-label="驾驶员签字"
+                  value={registryForm.driverSignature}
+                  onChange={(event) => updateRegistryField("driverSignature", event.target.value)}
+                />
+                {registryErrors.driverSignature ? (
+                  <small className="error">{registryErrors.driverSignature}</small>
+                ) : null}
+              </label>
+              <label className="field">
+                <span>加油费用</span>
+                <input
+                  aria-label="加油费用"
+                  value={registryForm.fuelFee}
+                  onChange={(event) => updateRegistryField("fuelFee", event.target.value)}
+                />
+              </label>
+              <label className="field">
+                <span>加油数量</span>
+                <input
+                  aria-label="加油数量"
+                  value={registryForm.fuelVolume}
+                  onChange={(event) => updateRegistryField("fuelVolume", event.target.value)}
+                />
+              </label>
+              <label className="field field-span-2">
+                <span>备注</span>
+                <input
+                  aria-label="备注"
+                  value={registryForm.remark}
+                  onChange={(event) => updateRegistryField("remark", event.target.value)}
+                />
+              </label>
+            </div>
+
+            {registryMessage ? <p className="message">{registryMessage}</p> : null}
+
+            <div className="action-row">
+              <button className="primary-button" type="submit">
+                提交登记
+              </button>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => {
+                  const shouldOpen = !isPasswordDialogOpen;
+                  closeInlinePanels();
+                  setPasswordMessage("");
+                  setPasswordErrors({});
+                  setIsPasswordDialogOpen(shouldOpen);
+                }}
+              >
+                修改密码
+              </button>
+              <button className="ghost-button" type="button" onClick={handleLogout}>
+                退出登录
+              </button>
+            </div>
+          </form>
+
+          {isPasswordDialogOpen ? (
+            <form className="password-dialog inline-panel" onSubmit={handleChangePassword} noValidate>
+              <h2>修改密码</h2>
+              <label className="field">
+                <span>当前密码</span>
+                <input
+                  autoComplete="current-password"
+                  type="password"
+                  value={passwordForm.currentPassword}
+                  onChange={(event) => updatePasswordField("currentPassword", event.target.value)}
+                />
+                {passwordErrors.currentPassword ? (
+                  <small className="error">{passwordErrors.currentPassword}</small>
+                ) : null}
+              </label>
+              <label className="field">
+                <span>新密码</span>
+                <input
+                  autoComplete="new-password"
+                  type="password"
+                  value={passwordForm.newPassword}
+                  onChange={(event) => updatePasswordField("newPassword", event.target.value)}
+                />
+                {passwordErrors.newPassword ? (
+                  <small className="error">{passwordErrors.newPassword}</small>
+                ) : null}
+              </label>
+              <label className="field">
+                <span>确认新密码</span>
+                <input
+                  autoComplete="new-password"
+                  type="password"
+                  value={passwordForm.confirmPassword}
+                  onChange={(event) => updatePasswordField("confirmPassword", event.target.value)}
+                />
+                {passwordErrors.confirmPassword ? (
+                  <small className="error">{passwordErrors.confirmPassword}</small>
+                ) : null}
+              </label>
+
+              {passwordMessage ? <p className="message">{passwordMessage}</p> : null}
+
+              <div className="action-row">
+                <button className="primary-button" type="submit">
+                  提交修改
+                </button>
+                <button
+                  className="ghost-button"
+                  type="button"
+                  onClick={() => {
+                    setIsPasswordDialogOpen(false);
+                    setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+                    setPasswordErrors({});
+                    setPasswordMessage("");
+                  }}
+                >
+                  取消
+                </button>
+              </div>
+            </form>
+          ) : null}
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="shell">
       <section className="panel workspace-panel">
         <div>
-          <p className="eyebrow">登记工作台</p>
-          <h1>公务用车使用登记</h1>
-          <p className="lede">填写当次用车信息后提交，系统会按车辆独立维护默认起步公里。</p>
+          <p className="eyebrow">管理工作台</p>
+          <h1>管理员管理工作台</h1>
+          <p className="lede">请选择要进入的管理模块。管理员登录后不再进入公务车登记表单。</p>
         </div>
 
         <div className="identity-card" aria-label="当前登录信息">
@@ -878,249 +1183,43 @@ export function App() {
           <p>当前角色：{roleLabels[user.role] ?? user.role}</p>
         </div>
 
-        <form className="form registry-form" onSubmit={handleRegistrySubmit} noValidate>
-          <label className="field registry-vehicle-field">
-            <span>车辆</span>
-            <select
-              aria-label="车辆"
-              value={selectedVehicleId}
-              onChange={(event) => {
-                setSelectedVehicleId(event.target.value);
-                setRegistryMessage("");
-              }}
-            >
-              {vehicles.length === 0 ? <option value="">暂无可用车辆</option> : null}
-              {vehicles.map((vehicle) => (
-                <option key={vehicle.id} value={vehicle.id}>
-                  {vehicle.vehicleCode} + {vehicle.plateNumber}
-                </option>
-              ))}
-            </select>
-            {registryErrors.vehicleId ? <small className="error">{registryErrors.vehicleId}</small> : null}
-          </label>
-
-          <div className="field-grid">
-            <label className="field">
-              <span>日期</span>
-              <input
-                aria-label="日期"
-                type="date"
-                value={registryForm.businessDate}
-                onChange={(event) => updateRegistryField("businessDate", event.target.value)}
-              />
-              {registryErrors.businessDate ? (
-                <small className="error">{registryErrors.businessDate}</small>
-              ) : null}
-            </label>
-            <label className="field">
-              <span>出车时间</span>
-              <input
-                aria-label="出车时间"
-                data-testid="registry-departure-time"
-                type="datetime-local"
-                value={registryForm.departureTime}
-                onChange={(event) => updateRegistryField("departureTime", event.target.value)}
-              />
-              {registryErrors.departureTime ? (
-                <small className="error">{registryErrors.departureTime}</small>
-              ) : null}
-            </label>
-            <label className="field">
-              <span>还车时间</span>
-              <input
-                aria-label="还车时间"
-                data-testid="registry-return-time"
-                type="datetime-local"
-                value={registryForm.returnTime}
-                onChange={(event) => updateRegistryField("returnTime", event.target.value)}
-              />
-              {registryErrors.returnTime ? (
-                <small className="error">{registryErrors.returnTime}</small>
-              ) : null}
-            </label>
-            <label className="field">
-              <span>事由</span>
-              <input
-                aria-label="事由"
-                value={registryForm.reason}
-                onChange={(event) => updateRegistryField("reason", event.target.value)}
-              />
-              {registryErrors.reason ? <small className="error">{registryErrors.reason}</small> : null}
-            </label>
-            <label className="field field-span-2">
-              <span>目的地及行车路线</span>
-              <input
-                aria-label="目的地及行车路线"
-                value={registryForm.route}
-                onChange={(event) => updateRegistryField("route", event.target.value)}
-              />
-              {registryErrors.route ? <small className="error">{registryErrors.route}</small> : null}
-            </label>
-            <label className="field">
-              <span>起步公里读数</span>
-              <input
-                aria-label="起步公里读数"
-                type="number"
-                min="0"
-                value={registryForm.startMileage}
-                onChange={(event) => updateRegistryField("startMileage", event.target.value)}
-              />
-              {registryErrors.startMileage ? (
-                <small className="error">{registryErrors.startMileage}</small>
-              ) : null}
-            </label>
-            <label className="field">
-              <span>终点公里读数</span>
-              <input
-                aria-label="终点公里读数"
-                type="number"
-                min="0"
-                value={registryForm.endMileage}
-                onChange={(event) => updateRegistryField("endMileage", event.target.value)}
-              />
-              {registryErrors.endMileage ? (
-                <small className="error">{registryErrors.endMileage}</small>
-              ) : null}
-            </label>
-            <label className="field">
-              <span>行车公里数</span>
-              <input aria-label="行车公里数" readOnly type="number" value={registryForm.distance} />
-            </label>
-            <label className="field">
-              <span>驾驶员签字</span>
-              <input
-                aria-label="驾驶员签字"
-                value={registryForm.driverSignature}
-                onChange={(event) => updateRegistryField("driverSignature", event.target.value)}
-              />
-              {registryErrors.driverSignature ? (
-                <small className="error">{registryErrors.driverSignature}</small>
-              ) : null}
-            </label>
-            <label className="field">
-              <span>加油费用</span>
-              <input
-                aria-label="加油费用"
-                value={registryForm.fuelFee}
-                onChange={(event) => updateRegistryField("fuelFee", event.target.value)}
-              />
-            </label>
-            <label className="field">
-              <span>加油数量</span>
-              <input
-                aria-label="加油数量"
-                value={registryForm.fuelVolume}
-                onChange={(event) => updateRegistryField("fuelVolume", event.target.value)}
-              />
-            </label>
-            <label className="field field-span-2">
-              <span>备注</span>
-              <input
-                aria-label="备注"
-                value={registryForm.remark}
-                onChange={(event) => updateRegistryField("remark", event.target.value)}
-              />
-            </label>
-          </div>
-
-          {registryMessage ? <p className="message">{registryMessage}</p> : null}
-
-          <div className="action-row">
-            <button className="primary-button" type="submit">
-              提交登记
+        <div className="action-row admin-toolbar">
+          {view !== adminHomeView ? (
+            <button className="secondary-button" type="button" onClick={openAdminHome}>
+              返回管理首页
             </button>
-            {user.role === "admin" ? (
-              <button className="secondary-button" type="button" onClick={openUserManagement}>
-                查看全部
+          ) : null}
+          <button className="ghost-button" type="button" onClick={handleLogout}>
+            退出登录
+          </button>
+        </div>
+
+        {view === adminHomeView ? (
+          <section className="management-panel" aria-label="管理员导航">
+            {userManagementMessage ? <p className="message">{userManagementMessage}</p> : null}
+
+            <div className="admin-nav-grid">
+              <button className="secondary-button admin-nav-card" type="button" onClick={openAdminUsers}>
+                用户账号管理
               </button>
-            ) : null}
-            <button
-              className="secondary-button"
-              type="button"
-              onClick={() => {
-                const shouldOpen = !isPasswordDialogOpen;
-                closeInlinePanels();
-                setPasswordMessage("");
-                setPasswordErrors({});
-                setIsPasswordDialogOpen(shouldOpen);
-              }}
-            >
-              修改密码
-            </button>
-            <button className="ghost-button" type="button" onClick={handleLogout}>
-              退出登录
-            </button>
-          </div>
-
-        </form>
-
-        {isPasswordDialogOpen ? (
-          <form className="password-dialog inline-panel" onSubmit={handleChangePassword} noValidate>
-            <h2>修改密码</h2>
-            <label className="field">
-              <span>当前密码</span>
-              <input
-                autoComplete="current-password"
-                type="password"
-                value={passwordForm.currentPassword}
-                onChange={(event) => updatePasswordField("currentPassword", event.target.value)}
-              />
-              {passwordErrors.currentPassword ? (
-                <small className="error">{passwordErrors.currentPassword}</small>
-              ) : null}
-            </label>
-            <label className="field">
-              <span>新密码</span>
-              <input
-                autoComplete="new-password"
-                type="password"
-                value={passwordForm.newPassword}
-                onChange={(event) => updatePasswordField("newPassword", event.target.value)}
-              />
-              {passwordErrors.newPassword ? (
-                <small className="error">{passwordErrors.newPassword}</small>
-              ) : null}
-            </label>
-            <label className="field">
-              <span>确认新密码</span>
-              <input
-                autoComplete="new-password"
-                type="password"
-                value={passwordForm.confirmPassword}
-                onChange={(event) => updatePasswordField("confirmPassword", event.target.value)}
-              />
-              {passwordErrors.confirmPassword ? (
-                <small className="error">{passwordErrors.confirmPassword}</small>
-              ) : null}
-            </label>
-
-            {passwordMessage ? <p className="message">{passwordMessage}</p> : null}
-
-            <div className="action-row">
-              <button className="primary-button" type="submit">
-                提交修改
+              <button className="secondary-button admin-nav-card" type="button" onClick={openAdminVehicles}>
+                公车档案管理
               </button>
-              <button
-                className="ghost-button"
-                type="button"
-                onClick={() => {
-                  setIsPasswordDialogOpen(false);
-                  setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
-                  setPasswordErrors({});
-                  setPasswordMessage("");
-                }}
-              >
-                取消
+              <button className="secondary-button admin-nav-card" type="button" onClick={openAdminRecords}>
+                用车记录管理
+              </button>
+              <button className="secondary-button admin-nav-card" type="button" onClick={openAdminPasswordModule}>
+                修改密码
               </button>
             </div>
-          </form>
+          </section>
         ) : null}
 
-        {view === "users" && user.role === "admin" ? (
+        {view === adminUsersView ? (
           <section className="management-panel" aria-label="用户账号管理">
             <div className="section-heading">
               <div>
-                <p className="eyebrow">管理页</p>
+                <p className="eyebrow">管理模块</p>
                 <h2>用户账号管理</h2>
               </div>
               <button
@@ -1320,11 +1419,11 @@ export function App() {
           </section>
         ) : null}
 
-        {view === "users" && user.role === "admin" ? (
+        {view === adminVehiclesView ? (
           <section className="management-panel" aria-label="公车档案管理">
             <div className="section-heading">
               <div>
-                <p className="eyebrow">管理页</p>
+                <p className="eyebrow">管理模块</p>
                 <h2>公车档案管理</h2>
               </div>
               <button
@@ -1341,6 +1440,8 @@ export function App() {
                 新增车辆
               </button>
             </div>
+
+            {userManagementMessage ? <p className="message">{userManagementMessage}</p> : null}
 
             <div className="user-list">
               {vehicles.length === 0 ? <p className="empty-state">暂无车辆</p> : null}
@@ -1450,17 +1551,19 @@ export function App() {
           </section>
         ) : null}
 
-        {view === "users" && user.role === "admin" ? (
+        {view === adminRecordsView ? (
           <section className="management-panel" aria-label="用车记录管理">
             <div className="section-heading">
               <div>
-                <p className="eyebrow">管理页</p>
+                <p className="eyebrow">管理模块</p>
                 <h2>用车记录管理</h2>
               </div>
               <button className="primary-button" type="button" onClick={handleExportRecords}>
                 导出 Excel
               </button>
             </div>
+
+            {userManagementMessage ? <p className="message">{userManagementMessage}</p> : null}
 
             <div className="filter-grid">
               <label className="field">
@@ -1501,6 +1604,7 @@ export function App() {
               <label className="field">
                 <span>按日期筛选</span>
                 <input
+                  aria-label="按日期筛选"
                   type="date"
                   value={recordFilters.businessDate}
                   onChange={(event) => updateRecordFilter("businessDate", event.target.value)}
@@ -1521,7 +1625,7 @@ export function App() {
               {filteredManagedRecords.map((record) => (
                 <article className="user-row" key={record.id}>
                   <div>
-                    <strong>{record.reason}</strong>
+                    <strong role="strong">{record.reason}</strong>
                     <p>
                       车辆：{record.vehicleCode} / {record.plateNumber}
                     </p>
@@ -1576,6 +1680,62 @@ export function App() {
                 </div>
               </section>
             ) : null}
+          </section>
+        ) : null}
+
+        {view === adminPasswordView ? (
+          <section className="management-panel" aria-label="修改密码">
+            <div>
+              <p className="eyebrow">管理模块</p>
+              <h2>修改密码</h2>
+            </div>
+
+            <form className="password-dialog" onSubmit={handleChangePassword} noValidate>
+              <label className="field">
+                <span>当前密码</span>
+                <input
+                  autoComplete="current-password"
+                  type="password"
+                  value={passwordForm.currentPassword}
+                  onChange={(event) => updatePasswordField("currentPassword", event.target.value)}
+                />
+                {passwordErrors.currentPassword ? (
+                  <small className="error">{passwordErrors.currentPassword}</small>
+                ) : null}
+              </label>
+              <label className="field">
+                <span>新密码</span>
+                <input
+                  autoComplete="new-password"
+                  type="password"
+                  value={passwordForm.newPassword}
+                  onChange={(event) => updatePasswordField("newPassword", event.target.value)}
+                />
+                {passwordErrors.newPassword ? (
+                  <small className="error">{passwordErrors.newPassword}</small>
+                ) : null}
+              </label>
+              <label className="field">
+                <span>确认新密码</span>
+                <input
+                  autoComplete="new-password"
+                  type="password"
+                  value={passwordForm.confirmPassword}
+                  onChange={(event) => updatePasswordField("confirmPassword", event.target.value)}
+                />
+                {passwordErrors.confirmPassword ? (
+                  <small className="error">{passwordErrors.confirmPassword}</small>
+                ) : null}
+              </label>
+
+              {passwordMessage ? <p className="message">{passwordMessage}</p> : null}
+
+              <div className="action-row">
+                <button className="primary-button" type="submit">
+                  提交修改
+                </button>
+              </div>
+            </form>
           </section>
         ) : null}
       </section>

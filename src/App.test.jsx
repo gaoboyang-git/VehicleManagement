@@ -356,9 +356,15 @@ describe("Issue 1 authentication UI", () => {
     await user.type(screen.getByLabelText("密码"), "admin");
     await user.click(screen.getByRole("button", { name: "登录" }));
 
-    expect(await screen.findByText("当前用户：admin")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "管理员管理工作台" })).toBeInTheDocument();
+    expect(screen.getByText("当前用户：admin")).toBeInTheDocument();
     expect(screen.getByText("当前角色：管理员")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "查看全部" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "用户账号管理" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "公车档案管理" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "用车记录管理" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "修改密码" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "查看全部" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "提交登记" })).not.toBeInTheDocument();
   });
 
   it("does not show the management entry after an employee logs in", async () => {
@@ -419,6 +425,34 @@ describe("Issue 1 authentication UI", () => {
     expect(await screen.findByText("密码已修改，请重新登录")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
   });
+
+  it("lets an administrator change the password from the admin home module", async () => {
+    const fetchMock = mockFetch((url) => {
+      if (url === "/api/login") {
+        return okJson({ user: { username: "admin", role: "admin" } });
+      }
+      return okJson({ message: "密码已修改，请重新登录" });
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.type(screen.getByLabelText("账号"), "admin");
+    await user.type(screen.getByLabelText("密码"), "admin");
+    await user.click(screen.getByRole("button", { name: "登录" }));
+    await user.click(await screen.findByRole("button", { name: "修改密码" }));
+
+    expect(await screen.findByRole("heading", { name: "修改密码" })).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("当前密码"), "admin");
+    await user.type(screen.getByLabelText("新密码"), "NewAdmin001");
+    await user.type(screen.getByLabelText("确认新密码"), "NewAdmin001");
+    await user.click(screen.getByRole("button", { name: "提交修改" }));
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(await screen.findByText("密码已修改，请重新登录")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
+  });
 });
 
 describe("Issue 2 user management UI", () => {
@@ -431,14 +465,14 @@ describe("Issue 2 user management UI", () => {
     await user.type(screen.getByLabelText("账号"), "admin");
     await user.type(screen.getByLabelText("密码"), "admin");
     await user.click(screen.getByRole("button", { name: "登录" }));
-    await user.click(await screen.findByRole("button", { name: "查看全部" }));
+    await user.click(await screen.findByRole("button", { name: "用户账号管理" }));
   }
 
   async function loginAsManagerAndOpenUsers(user) {
     await user.type(screen.getByLabelText("账号"), "manager");
     await user.type(screen.getByLabelText("密码"), "Manager001");
     await user.click(screen.getByRole("button", { name: "登录" }));
-    await user.click(await screen.findByRole("button", { name: "查看全部" }));
+    await user.click(await screen.findByRole("button", { name: "用户账号管理" }));
   }
 
   it("lets an administrator open user management and create an employee", async () => {
@@ -462,7 +496,7 @@ describe("Issue 2 user management UI", () => {
     expect(screen.getByText("普通员工")).toBeInTheDocument();
   });
 
-  it("toggles the management area and inline forms in place", async () => {
+  it("switches modules from the admin home and closes inline forms", async () => {
     mockUserManagementFetch([
       { id: "admin-id", username: "admin", role: "admin", isBuiltinAdmin: true },
       { id: "employee-id", username: "employee", role: "employee", isBuiltinAdmin: false }
@@ -474,17 +508,19 @@ describe("Issue 2 user management UI", () => {
     await user.type(screen.getByLabelText("密码"), "admin");
     await user.click(screen.getByRole("button", { name: "登录" }));
 
-    const viewAllButton = await screen.findByRole("button", { name: "查看全部" });
-    await user.click(viewAllButton);
+    expect(await screen.findByRole("heading", { name: "管理员管理工作台" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "用户账号管理" }));
     expect(await screen.findByRole("heading", { name: "用户账号管理" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "新增用户" }));
     expect(screen.getByRole("heading", { name: "新增用户" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "新增用户" }));
+    await user.click(screen.getByRole("button", { name: "返回管理首页" }));
+    expect(await screen.findByRole("heading", { name: "管理员管理工作台" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "新增用户" })).not.toBeInTheDocument();
 
-    await user.click(viewAllButton);
+    await user.click(screen.getByRole("button", { name: "公车档案管理" }));
+    expect(await screen.findByRole("heading", { name: "公车档案管理" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "用户账号管理" })).not.toBeInTheDocument();
   });
 
@@ -605,10 +641,10 @@ describe("Issue 3 vehicle management UI", () => {
     await user.type(screen.getByLabelText("账号"), "admin");
     await user.type(screen.getByLabelText("密码"), "admin");
     await user.click(screen.getByRole("button", { name: "登录" }));
-    await user.click(await screen.findByRole("button", { name: "查看全部" }));
+    await user.click(await screen.findByRole("button", { name: "公车档案管理" }));
   }
 
-  it("lets an administrator create a vehicle and shows it in the registry dropdown", async () => {
+  it("lets an administrator create a vehicle inside the vehicle management module", async () => {
     mockUserManagementFetch(
       [{ id: "admin-id", username: "admin", role: "admin", isBuiltinAdmin: true }],
       []
@@ -626,7 +662,6 @@ describe("Issue 3 vehicle management UI", () => {
 
     expect(await screen.findByText("CAR-001")).toBeInTheDocument();
     expect(screen.getByText("沪A-10001")).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "CAR-001 + 沪A-10001" })).toBeInTheDocument();
   });
 
   it("shows duplicate vehicle code and plate number errors without changing the visible list", async () => {
@@ -656,7 +691,7 @@ describe("Issue 3 vehicle management UI", () => {
     expect(screen.getAllByText("CAR-001")).toHaveLength(1);
   });
 
-  it("requires delete confirmation and removes the vehicle from the registry dropdown after confirmation", async () => {
+  it("requires delete confirmation and removes the vehicle from the vehicle management list after confirmation", async () => {
     mockUserManagementFetch(
       [{ id: "admin-id", username: "admin", role: "admin", isBuiltinAdmin: true }],
       [{ id: "cancel-vehicle", vehicleCode: "CAR-CANCEL", plateNumber: "沪A-CANCEL", brandModel: "别克GL8", isDeleted: false }]
@@ -671,13 +706,11 @@ describe("Issue 3 vehicle management UI", () => {
 
     await user.click(screen.getByRole("button", { name: "取消删除车辆" }));
     expect(screen.getByText("CAR-CANCEL")).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "CAR-CANCEL + 沪A-CANCEL" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "删除车辆 CAR-CANCEL" }));
     await user.click(screen.getByRole("button", { name: "确认删除车辆" }));
 
     expect(screen.queryByText("CAR-CANCEL")).not.toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "CAR-CANCEL + 沪A-CANCEL" })).not.toBeInTheDocument();
   });
 });
 
@@ -690,12 +723,6 @@ describe("Issue 4 registry UI", () => {
   async function loginAsEmployee(user) {
     await user.type(screen.getByLabelText("账号"), "employee");
     await user.type(screen.getByLabelText("密码"), "Employee001");
-    await user.click(screen.getByRole("button", { name: "登录" }));
-  }
-
-  async function loginAsAdmin(user) {
-    await user.type(screen.getByLabelText("账号"), "admin");
-    await user.type(screen.getByLabelText("密码"), "admin");
     await user.click(screen.getByRole("button", { name: "登录" }));
   }
 
@@ -917,6 +944,11 @@ describe("Issue 5 record management UI", () => {
     await user.click(screen.getByRole("button", { name: "登录" }));
   }
 
+  async function loginAsAdminAndOpenRecords(user) {
+    await loginAsAdmin(user);
+    await user.click(await screen.findByRole("button", { name: "用车记录管理" }));
+  }
+
   it("shows the admin record list without edit actions", async () => {
     mockAdminRecordManagementFetch({
       users: [{ id: "admin-id", username: "admin", role: "admin", isBuiltinAdmin: true }],
@@ -959,8 +991,7 @@ describe("Issue 5 record management UI", () => {
     const user = userEvent.setup();
 
     render(<App />);
-    await loginAsAdmin(user);
-    await user.click(await screen.findByRole("button", { name: "查看全部" }));
+    await loginAsAdminAndOpenRecords(user);
 
     const recordSection = await screen.findByRole("region", { name: "用车记录管理" });
 
@@ -1060,8 +1091,7 @@ describe("Issue 5 record management UI", () => {
     const user = userEvent.setup();
 
     render(<App />);
-    await loginAsAdmin(user);
-    await user.click(await screen.findByRole("button", { name: "查看全部" }));
+    await loginAsAdminAndOpenRecords(user);
 
     const recordSection = screen.getByRole("region", { name: "用车记录管理" });
     const recordTitles = within(recordSection).getAllByRole("strong").map((node) => node.textContent);
@@ -1156,8 +1186,9 @@ describe("Issue 5 record management UI", () => {
 
     render(<App />);
     await loginAsAdmin(user);
-    expect(await screen.findByLabelText("起步公里读数")).toHaveValue(1000);
-    await user.click(await screen.findByRole("button", { name: "查看全部" }));
+    expect(await screen.findByRole("heading", { name: "管理员管理工作台" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("起步公里读数")).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "用车记录管理" }));
     await user.click(await screen.findByRole("button", { name: "删除记录 REC-DELETE" }));
 
     expect(screen.getByText("确认删除记录 CAR-001 / 2026-07-20 / employee / REC-DELETE？")).toBeInTheDocument();
@@ -1169,9 +1200,7 @@ describe("Issue 5 record management UI", () => {
     await user.click(screen.getByRole("button", { name: "确认删除记录" }));
 
     expect(screen.queryByText("REC-DELETE")).not.toBeInTheDocument();
-    await waitFor(() => {
-      expect(screen.getByLabelText("起步公里读数")).toHaveValue(900);
-    });
+    expect(screen.queryByText("REC-DELETE")).not.toBeInTheDocument();
   });
 
   it("downloads an xlsx file when the administrator exports records", async () => {
@@ -1212,8 +1241,7 @@ describe("Issue 5 record management UI", () => {
     });
 
     render(<App />);
-    await loginAsAdmin(user);
-    await user.click(await screen.findByRole("button", { name: "查看全部" }));
+    await loginAsAdminAndOpenRecords(user);
     await user.click(await screen.findByRole("button", { name: "导出 Excel" }));
 
     expect(await screen.findByText("Excel 已导出")).toBeInTheDocument();
