@@ -418,6 +418,7 @@ describe("Issue 1 authentication UI", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(screen.getByText("账号必填")).toBeInTheDocument();
     expect(screen.getByText("密码必填")).toBeInTheDocument();
+    expect(screen.getByText("© 2026 公务用车管理平台 · 版权所有")).toBeInTheDocument();
   });
 
   it("toggles password visibility on the login form", async () => {
@@ -445,7 +446,7 @@ describe("Issue 1 authentication UI", () => {
     await user.type(screen.getByLabelText("密码"), "admin");
     await user.click(screen.getByRole("button", { name: "登录" }));
 
-    expect(await screen.findByRole("heading", { name: "管理员管理工作台" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "管理员工作台" })).toBeInTheDocument();
     expect(screen.getByText("当前用户：admin")).toBeInTheDocument();
     expect(screen.getByText("当前角色：管理员")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "用户账号管理" })).toBeInTheDocument();
@@ -481,6 +482,7 @@ describe("Issue 1 authentication UI", () => {
     await user.type(screen.getByLabelText("密码"), "Employee001");
     await user.click(screen.getByRole("button", { name: "登录" }));
     await user.click(await screen.findByRole("button", { name: "修改密码" }));
+    expect(screen.queryByRole("button", { name: "取消" })).not.toBeInTheDocument();
     await user.type(screen.getByLabelText("当前密码"), "Employee001");
     await user.type(screen.getByLabelText("新密码"), "NewEmployee001");
     await user.type(screen.getByLabelText("确认新密码"), "Different001");
@@ -550,7 +552,8 @@ describe("Issue 1 authentication UI", () => {
     await user.click(screen.getByRole("button", { name: "登录" }));
     await user.click(await screen.findByRole("button", { name: "修改密码" }));
 
-    expect(await screen.findByRole("heading", { name: "修改密码" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "修改密码" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "管理员工作台" })).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("当前密码"), "admin");
     await user.type(screen.getByLabelText("新密码"), "NewAdmin001");
@@ -648,7 +651,7 @@ describe("Issue 2 user management UI", () => {
     await user.type(screen.getByLabelText("密码"), "admin");
     await user.click(screen.getByRole("button", { name: "登录" }));
 
-    expect(await screen.findByRole("heading", { name: "管理员管理工作台" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "管理员工作台" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "用户账号管理" }));
     expect(await screen.findByRole("heading", { name: "用户账号管理" })).toBeInTheDocument();
 
@@ -656,7 +659,7 @@ describe("Issue 2 user management UI", () => {
     expect(screen.getByRole("heading", { name: "新增用户" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "返回管理首页" }));
-    expect(await screen.findByRole("heading", { name: "管理员管理工作台" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "管理员工作台" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "新增用户" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "公车档案管理" }));
@@ -692,9 +695,9 @@ describe("Issue 2 user management UI", () => {
     await loginAsAdminAndOpenUsers(user);
     await user.click(await screen.findByRole("button", { name: "删除 cancel_user" }));
 
-    expect(screen.getByText("确认删除 cancel_user？")).toBeInTheDocument();
+    expect(screen.getByText("确认删除账号「cancel_user」？此操作不可撤销。")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "取消删除" }));
+    await user.click(screen.getByRole("button", { name: "取消" }));
     expect(screen.getByText("cancel_user")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "删除 cancel_user" }));
@@ -718,15 +721,15 @@ describe("Issue 2 user management UI", () => {
     expect(screen.getByRole("button", { name: "重置密码 manager" })).toBeInTheDocument();
 
     await user.click(await screen.findByRole("button", { name: "重置密码 reset_user" }));
-    const resetInput = screen.getByLabelText("重置新密码");
+    const resetInput = screen.getByLabelText("新密码");
     expect(resetInput).toHaveAttribute("type", "password");
-    await user.click(screen.getByRole("button", { name: "显示重置新密码" }));
+    await user.click(screen.getByRole("button", { name: "显示新密码" }));
     expect(resetInput).toHaveAttribute("type", "text");
-    await user.click(screen.getByRole("button", { name: "隐藏重置新密码" }));
+    await user.click(screen.getByRole("button", { name: "隐藏新密码" }));
     expect(resetInput).toHaveAttribute("type", "password");
     await user.type(resetInput, "abc");
-    await user.type(screen.getByLabelText("确认重置密码"), "abc");
-    await user.click(screen.getByRole("button", { name: "提交重置" }));
+    await user.type(screen.getByLabelText("确认新密码"), "abc");
+    await user.click(screen.getByRole("button", { name: "确认重置" }));
 
     expect(await screen.findByText("密码已重置")).toBeInTheDocument();
   });
@@ -749,9 +752,9 @@ describe("Issue 2 user management UI", () => {
 
     expect(await screen.findByRole("button", { name: "重置密码 manager" })).toBeInTheDocument();
     await adminActions.click(screen.getByRole("button", { name: "重置密码 manager" }));
-    await adminActions.type(screen.getByLabelText("重置新密码"), "ResetManager001");
-    await adminActions.type(screen.getByLabelText("确认重置密码"), "ResetManager001");
-    await adminActions.click(screen.getByRole("button", { name: "提交重置" }));
+    await adminActions.type(screen.getByLabelText("新密码"), "ResetManager001");
+    await adminActions.type(screen.getByLabelText("确认新密码"), "ResetManager001");
+    await adminActions.click(screen.getByRole("button", { name: "确认重置" }));
     expect(await screen.findByText("密码已重置")).toBeInTheDocument();
 
     cleanup();
@@ -804,26 +807,37 @@ describe("Issue 3 vehicle management UI", () => {
     await user.type(screen.getByLabelText("车辆编号"), "CAR-001");
     await user.type(screen.getByLabelText("车牌号码"), "沪A-10001");
     await user.type(screen.getByLabelText("品牌型号"), "大众帕萨特");
-    await user.click(screen.getByRole("button", { name: "提交车辆" }));
+    await user.click(screen.getByRole("button", { name: "提交新增" }));
 
-    expect(await screen.findByText("CAR-001")).toBeInTheDocument();
-    expect(screen.getByText("沪A-10001")).toBeInTheDocument();
+    expect(await screen.findByText("沪A-10001")).toBeInTheDocument();
+    expect(screen.getByText("大众帕萨特")).toBeInTheDocument();
+    expect(screen.getByText("在用")).toBeInTheDocument();
   });
 
   it("shows duplicate vehicle code and plate number errors without changing the visible list", async () => {
     mockUserManagementFetch(
       [{ id: "admin-id", username: "admin", role: "admin", isBuiltinAdmin: true }],
-      [{ id: "vehicle-id", vehicleCode: "CAR-001", plateNumber: "沪A-10001", brandModel: "大众帕萨特", isDeleted: false }]
+      [
+        {
+          id: "vehicle-id",
+          vehicleCode: "CAR-001",
+          plateNumber: "沪A-10001",
+          brandModel: "大众帕萨特",
+          isDeleted: false,
+          status: "idle"
+        }
+      ]
     );
     const user = userEvent.setup();
 
     render(<App />);
     await loginAsAdminAndOpenManagement(user);
+    expect(await screen.findByText("闲置")).toBeInTheDocument();
     await user.click(await screen.findByRole("button", { name: "新增车辆" }));
     await user.type(screen.getByLabelText("车辆编号"), "CAR-001");
     await user.type(screen.getByLabelText("车牌号码"), "沪A-10002");
     await user.type(screen.getByLabelText("品牌型号"), "丰田凯美瑞");
-    await user.click(screen.getByRole("button", { name: "提交车辆" }));
+    await user.click(screen.getByRole("button", { name: "提交新增" }));
 
     expect(await screen.findByText("车辆编号已存在")).toBeInTheDocument();
 
@@ -831,10 +845,10 @@ describe("Issue 3 vehicle management UI", () => {
     await user.clear(screen.getByLabelText("车牌号码"));
     await user.type(screen.getByLabelText("车辆编号"), "CAR-002");
     await user.type(screen.getByLabelText("车牌号码"), "沪A-10001");
-    await user.click(screen.getByRole("button", { name: "提交车辆" }));
+    await user.click(screen.getByRole("button", { name: "提交新增" }));
 
     expect(await screen.findByText("车牌号已存在")).toBeInTheDocument();
-    expect(screen.getAllByText("CAR-001")).toHaveLength(1);
+    expect(screen.getAllByText("沪A-10001")).toHaveLength(1);
   });
 
   it("requires delete confirmation and removes the vehicle from the vehicle management list after confirmation", async () => {
@@ -848,15 +862,15 @@ describe("Issue 3 vehicle management UI", () => {
     await loginAsAdminAndOpenManagement(user);
     await user.click(await screen.findByRole("button", { name: "删除车辆 CAR-CANCEL" }));
 
-    expect(screen.getByText("确认删除车辆 CAR-CANCEL / 沪A-CANCEL？")).toBeInTheDocument();
+    expect(screen.getByText("确认删除车辆「CAR-CANCEL」？此操作不可撤销。")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "取消删除车辆" }));
-    expect(screen.getByText("CAR-CANCEL")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.getByText("沪A-CANCEL")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "删除车辆 CAR-CANCEL" }));
-    await user.click(screen.getByRole("button", { name: "确认删除车辆" }));
+    await user.click(screen.getByRole("button", { name: "确认删除" }));
 
-    expect(screen.queryByText("CAR-CANCEL")).not.toBeInTheDocument();
+    expect(screen.queryByText("沪A-CANCEL")).not.toBeInTheDocument();
   });
 });
 
@@ -1166,7 +1180,7 @@ describe("Issue 5 record management UI", () => {
     await user.click(await screen.findByRole("button", { name: "用车记录管理" }));
   }
 
-  it("shows the admin record list without edit actions", async () => {
+  it("shows compact admin record cards and expands a record to reveal full details", async () => {
     mockAdminRecordManagementFetch({
       users: [{ id: "admin-id", username: "admin", role: "admin", isBuiltinAdmin: true }],
       vehicles: [
@@ -1212,9 +1226,14 @@ describe("Issue 5 record management UI", () => {
 
     const recordSection = await screen.findByRole("region", { name: "用车记录管理" });
 
-    expect(within(recordSection).getByText("REC-001")).toBeInTheDocument();
-    expect(within(recordSection).getByText("登记人：admin")).toBeInTheDocument();
+    expect(within(recordSection).getByText("2026-07-20 · REC-001")).toBeInTheDocument();
+    expect(within(recordSection).queryByText("加油：0元/0L")).not.toBeInTheDocument();
+    expect(within(recordSection).queryByRole("button", { name: "删除记录 REC-001" })).not.toBeInTheDocument();
+
+    await user.click(within(recordSection).getByRole("button", { name: "查看记录 REC-001" }));
+
     expect(within(recordSection).getByText("加油：0元/0L")).toBeInTheDocument();
+    expect(within(recordSection).getByRole("button", { name: "删除记录 REC-001" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /编辑/ })).not.toBeInTheDocument();
   });
 
@@ -1312,32 +1331,34 @@ describe("Issue 5 record management UI", () => {
     await loginAsAdminAndOpenRecords(user);
 
     const recordSection = screen.getByRole("region", { name: "用车记录管理" });
-    const recordTitles = within(recordSection).getAllByRole("strong").map((node) => node.textContent);
+    const recordTitles = within(recordSection)
+      .getAllByRole("button", { name: /查看记录 / })
+      .map((node) => node.getAttribute("aria-label")?.replace("查看记录 ", ""));
     expect(recordTitles).toEqual(["LATEST", "MIDDLE", "EARLIEST"]);
 
     await user.type(within(recordSection).getByLabelText("搜索记录"), "MIDDLE");
-    expect(within(recordSection).getByText("MIDDLE")).toBeInTheDocument();
-    expect(within(recordSection).queryByText("LATEST")).not.toBeInTheDocument();
+    expect(within(recordSection).getByRole("button", { name: "查看记录 MIDDLE" })).toBeInTheDocument();
+    expect(within(recordSection).queryByRole("button", { name: "查看记录 LATEST" })).not.toBeInTheDocument();
 
     await user.clear(within(recordSection).getByLabelText("搜索记录"));
     await user.selectOptions(within(recordSection).getByLabelText("按车辆筛选"), "CAR-001");
-    expect(within(recordSection).getByText("LATEST")).toBeInTheDocument();
-    expect(within(recordSection).getByText("EARLIEST")).toBeInTheDocument();
-    expect(within(recordSection).queryByText("MIDDLE")).not.toBeInTheDocument();
+    expect(within(recordSection).getByRole("button", { name: "查看记录 LATEST" })).toBeInTheDocument();
+    expect(within(recordSection).getByRole("button", { name: "查看记录 EARLIEST" })).toBeInTheDocument();
+    expect(within(recordSection).queryByRole("button", { name: "查看记录 MIDDLE" })).not.toBeInTheDocument();
 
     await user.selectOptions(within(recordSection).getByLabelText("按登记人筛选"), "admin");
-    expect(within(recordSection).getByText("LATEST")).toBeInTheDocument();
-    expect(within(recordSection).queryByText("EARLIEST")).not.toBeInTheDocument();
+    expect(within(recordSection).getByRole("button", { name: "查看记录 LATEST" })).toBeInTheDocument();
+    expect(within(recordSection).queryByRole("button", { name: "查看记录 EARLIEST" })).not.toBeInTheDocument();
 
     fireEvent.change(within(recordSection).getByLabelText("按日期筛选"), {
       target: { value: "2026-07-20" }
     });
-    expect(within(recordSection).getByText("LATEST")).toBeInTheDocument();
+    expect(within(recordSection).getByRole("button", { name: "查看记录 LATEST" })).toBeInTheDocument();
 
     await user.click(within(recordSection).getByRole("button", { name: "清空筛选" }));
-    expect(within(recordSection).getByText("LATEST")).toBeInTheDocument();
-    expect(within(recordSection).getByText("MIDDLE")).toBeInTheDocument();
-    expect(within(recordSection).getByText("EARLIEST")).toBeInTheDocument();
+    expect(within(recordSection).getByRole("button", { name: "查看记录 LATEST" })).toBeInTheDocument();
+    expect(within(recordSection).getByRole("button", { name: "查看记录 MIDDLE" })).toBeInTheDocument();
+    expect(within(recordSection).getByRole("button", { name: "查看记录 EARLIEST" })).toBeInTheDocument();
   });
 
   it("supports canceling and confirming record deletion, then refreshes the start mileage", async () => {
@@ -1404,21 +1425,23 @@ describe("Issue 5 record management UI", () => {
 
     render(<App />);
     await loginAsAdmin(user);
-    expect(await screen.findByRole("heading", { name: "管理员管理工作台" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "管理员工作台" })).toBeInTheDocument();
     expect(screen.queryByLabelText("起步公里读数")).not.toBeInTheDocument();
     await user.click(await screen.findByRole("button", { name: "用车记录管理" }));
+    await user.click(await screen.findByRole("button", { name: "查看记录 REC-DELETE" }));
     await user.click(await screen.findByRole("button", { name: "删除记录 REC-DELETE" }));
 
-    expect(screen.getByText("确认删除记录 CAR-001 / 2026-07-20 / employee / REC-DELETE？")).toBeInTheDocument();
+    expect(
+      screen.getByText("确认删除记录「CAR-001 / 2026-07-20 / employee / REC-DELETE」？此操作不可撤销。")
+    ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "取消删除记录" }));
-    expect(screen.getByText("REC-DELETE")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.getByRole("button", { name: "删除记录 REC-DELETE" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "删除记录 REC-DELETE" }));
-    await user.click(screen.getByRole("button", { name: "确认删除记录" }));
+    await user.click(screen.getByRole("button", { name: "确认删除" }));
 
-    expect(screen.queryByText("REC-DELETE")).not.toBeInTheDocument();
-    expect(screen.queryByText("REC-DELETE")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "删除记录 REC-DELETE" })).not.toBeInTheDocument();
   });
 
   it("supports selecting filtered records for batch deletion and clears selection when filters change", async () => {
@@ -1502,13 +1525,13 @@ describe("Issue 5 record management UI", () => {
     expect(within(recordSection).getByText("已选 2 条")).toBeInTheDocument();
 
     await user.click(within(recordSection).getByRole("button", { name: "批量删除" }));
-    expect(screen.getByText("确认删除已选 2 条记录？")).toBeInTheDocument();
+    expect(screen.getByText("确认删除已选 2 条记录？此操作不可撤销。")).toBeInTheDocument();
 
     fireEvent.change(within(recordSection).getByLabelText("按日期筛选"), {
       target: { value: "2026-07-21" }
     });
     expect(within(recordSection).getByText("已选 0 条")).toBeInTheDocument();
-    expect(screen.queryByText("确认删除已选 2 条记录？")).not.toBeInTheDocument();
+    expect(screen.queryByText("确认删除已选 2 条记录？此操作不可撤销。")).not.toBeInTheDocument();
 
     await user.clear(within(recordSection).getByLabelText("搜索记录"));
     fireEvent.change(within(recordSection).getByLabelText("按日期筛选"), {
@@ -1516,7 +1539,7 @@ describe("Issue 5 record management UI", () => {
     });
     await user.click(within(recordSection).getByRole("button", { name: "全选当前筛选结果" }));
     await user.click(within(recordSection).getByRole("button", { name: "批量删除" }));
-    await user.click(screen.getByRole("button", { name: "确认批量删除" }));
+    await user.click(screen.getByRole("button", { name: "确认删除" }));
 
     expect(await screen.findByText("已删除 3 条记录")).toBeInTheDocument();
     expect(screen.queryByText("BULK-A")).not.toBeInTheDocument();

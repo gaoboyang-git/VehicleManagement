@@ -1,8 +1,59 @@
 import { useEffect, useState } from "react";
+import adminHeaderCarIcon from "./assets/admin-home/header-car.png";
+import adminPasswordIcon from "./assets/admin-home/password.png";
+import adminRecordsIcon from "./assets/admin-home/records.png";
+import adminUsersIcon from "./assets/admin-home/users.png";
+import adminVehicleListIcon from "./assets/admin-home/vehicle-list-car.png";
+import adminVehiclesIcon from "./assets/admin-home/vehicles.png";
+import accountIcon from "./assets/figma/account-icon.svg";
+import calendarIcon from "./assets/figma/calendar.svg";
+import closeIcon from "./assets/figma/close.svg";
+import emptyFileIcon from "./assets/figma/empty-file.svg";
+import employeeHeaderCarIcon from "./assets/figma/employee-header-car.png";
+import employeeLogoutIcon from "./assets/figma/employee-logout.png";
+import exportIcon from "./assets/figma/export.svg";
+import eyeIcon from "./assets/figma/eye-icon.svg";
+import keyIcon from "./assets/figma/key.svg";
+import navBackIcon from "./assets/figma/nav-back.svg";
+import navPlusIcon from "./assets/figma/nav-plus.svg";
+import passwordIcon from "./assets/figma/password-icon.svg";
+import searchIcon from "./assets/figma/search.svg";
+import shieldIcon from "./assets/figma/shield-icon.svg";
+import trashIcon from "./assets/figma/trash.svg";
+import userAdminIcon from "./assets/figma/user-admin.svg";
+import userEmployeeIcon from "./assets/figma/user-employee.svg";
+import vehicleLogo from "./assets/figma/vehicle-logo.svg";
 
 const roleLabels = {
   admin: "管理员",
   employee: "普通员工"
+};
+
+const assetIcons = {
+  account: accountIcon,
+  adminHeaderCar: adminHeaderCarIcon,
+  adminPassword: adminPasswordIcon,
+  adminRecords: adminRecordsIcon,
+  adminUsers: adminUsersIcon,
+  adminVehicleList: adminVehicleListIcon,
+  adminVehicles: adminVehiclesIcon,
+  calendar: calendarIcon,
+  close: closeIcon,
+  emptyFile: emptyFileIcon,
+  employeeHeaderCar: employeeHeaderCarIcon,
+  employeeLogout: employeeLogoutIcon,
+  export: exportIcon,
+  eye: eyeIcon,
+  key: keyIcon,
+  navBack: navBackIcon,
+  navPlus: navPlusIcon,
+  password: passwordIcon,
+  search: searchIcon,
+  shield: shieldIcon,
+  trash: trashIcon,
+  userAdmin: userAdminIcon,
+  userEmployee: userEmployeeIcon,
+  vehicle: vehicleLogo
 };
 
 function todayString() {
@@ -138,6 +189,18 @@ function formatFuelDisplay(fuelFee, fuelVolume) {
   return `${feeText ? `${feeText}元` : "-"}/${volumeText ? `${volumeText}L` : "-"}`;
 }
 
+function getVehicleUsageStatus(vehicle) {
+  if (vehicle?.isInUse === true || vehicle?.status === "inUse" || vehicle?.status === "在用") {
+    return "在用";
+  }
+
+  if (vehicle?.isInUse === false || vehicle?.status === "idle" || vehicle?.status === "闲置") {
+    return "闲置";
+  }
+
+  return "在用";
+}
+
 function buildRecordQueryString(filters) {
   const params = new URLSearchParams();
   params.set("keyword", String(filters.keyword ?? ""));
@@ -154,6 +217,337 @@ function formatExportFileName(date = new Date()) {
   return `用车记录-${year}年${month}月${day}日.xlsx`;
 }
 
+function AppIcon({ name, className = "" }) {
+  const classes = className ? `app-icon ${className}` : "app-icon";
+
+  switch (name) {
+    case "arrowLeft":
+      return (
+        <svg aria-hidden="true" className={classes} viewBox="0 0 24 24">
+          <path
+            d="M14.5 5.5 8 12l6.5 6.5"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2.5"
+          />
+        </svg>
+      );
+    case "chevronRight":
+      return (
+        <svg aria-hidden="true" className={classes} viewBox="0 0 24 24">
+          <path
+            d="M9.5 5.5 16 12l-6.5 6.5"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2.5"
+          />
+        </svg>
+      );
+    case "user":
+      return (
+        <svg aria-hidden="true" className={classes} viewBox="0 0 24 24">
+          <circle cx="12" cy="8.5" fill="none" r="3.5" stroke="currentColor" strokeWidth="2.2" />
+          <path
+            d="M5.5 19c1.5-3 4-4.5 6.5-4.5S17 16 18.5 19"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeWidth="2.2"
+          />
+        </svg>
+      );
+    case "users":
+      return (
+        <svg aria-hidden="true" className={classes} viewBox="0 0 24 24">
+          <circle cx="10" cy="8.5" fill="none" r="3.2" stroke="currentColor" strokeWidth="2" />
+          <path
+            d="M4.5 18.5c1.4-2.8 3.8-4.2 6-4.2 2.1 0 4.4 1.2 5.8 3.8"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeWidth="2"
+          />
+          <path
+            d="M16.5 7a2.7 2.7 0 0 1 0 5.4"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeWidth="2"
+          />
+          <path
+            d="M18.5 17.8c-.5-1.5-1.6-2.7-3.1-3.5"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeWidth="2"
+          />
+        </svg>
+      );
+    case "car":
+      return (
+        <svg aria-hidden="true" className={classes} viewBox="0 0 24 24">
+          <path
+            d="M5 14.5V11c0-1.1.7-2.1 1.7-2.5L9 7h6l2.3 1.5c1 .4 1.7 1.4 1.7 2.5v3.5"
+            fill="none"
+            stroke="currentColor"
+            strokeLinejoin="round"
+            strokeWidth="2"
+          />
+          <path
+            d="M4 14.5h16v2a1.5 1.5 0 0 1-1.5 1.5h-1.2"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+          />
+          <path
+            d="M6.7 18H5.5A1.5 1.5 0 0 1 4 16.5v-2"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+          />
+          <circle cx="8" cy="15.8" r="1.6" fill="none" stroke="currentColor" strokeWidth="2" />
+          <circle cx="16" cy="15.8" r="1.6" fill="none" stroke="currentColor" strokeWidth="2" />
+        </svg>
+      );
+    case "file":
+      return (
+        <svg aria-hidden="true" className={classes} viewBox="0 0 24 24">
+          <path
+            d="M8 3.5h6l4 4v11a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2Z"
+            fill="none"
+            stroke="currentColor"
+            strokeLinejoin="round"
+            strokeWidth="2"
+          />
+          <path
+            d="M14 3.5V8h4"
+            fill="none"
+            stroke="currentColor"
+            strokeLinejoin="round"
+            strokeWidth="2"
+          />
+          <path
+            d="M9 12h6M9 16h6"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeWidth="2"
+          />
+        </svg>
+      );
+    case "lock":
+      return (
+        <svg aria-hidden="true" className={classes} viewBox="0 0 24 24">
+          <rect
+            fill="none"
+            height="9"
+            rx="2.4"
+            stroke="currentColor"
+            strokeWidth="2"
+            width="14"
+            x="5"
+            y="10"
+          />
+          <path
+            d="M8 10V7.5A4 4 0 0 1 12 3.5a4 4 0 0 1 4 4V10"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeWidth="2"
+          />
+        </svg>
+      );
+    case "shield":
+      return (
+        <svg aria-hidden="true" className={classes} viewBox="0 0 24 24">
+          <path
+            d="M12 3.5 18 6v5.6c0 3.4-2.4 6.5-6 7.9-3.6-1.4-6-4.5-6-7.9V6l6-2.5Z"
+            fill="none"
+            stroke="currentColor"
+            strokeLinejoin="round"
+            strokeWidth="2"
+          />
+        </svg>
+      );
+    case "download":
+      return (
+        <svg aria-hidden="true" className={classes} viewBox="0 0 24 24">
+          <path
+            d="M12 5.5v8"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeWidth="2.2"
+          />
+          <path
+            d="m8.5 10.5 3.5 3.5 3.5-3.5"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2.2"
+          />
+          <path
+            d="M6 18.5h12"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeWidth="2.2"
+          />
+        </svg>
+      );
+    case "logout":
+      return (
+        <svg aria-hidden="true" className={classes} viewBox="0 0 24 24">
+          <path
+            d="M14 7.5h3.5v9H14"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+          />
+          <path
+            d="M10.5 12h8"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeWidth="2"
+          />
+          <path
+            d="m15.5 8.5 3.5 3.5-3.5 3.5"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+          />
+          <path
+            d="M10 18.5H7A1.5 1.5 0 0 1 5.5 17V7A1.5 1.5 0 0 1 7 5.5h3"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+          />
+        </svg>
+      );
+    case "warning":
+      return (
+        <svg aria-hidden="true" className={classes} viewBox="0 0 24 24">
+          <path
+            d="M12 5 4.8 18a1 1 0 0 0 .9 1.5h12.6a1 1 0 0 0 .9-1.5L12 5Z"
+            fill="none"
+            stroke="currentColor"
+            strokeLinejoin="round"
+            strokeWidth="2"
+          />
+          <path
+            d="M12 9v4.5"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeWidth="2"
+          />
+          <circle cx="12" cy="16.8" r="1" fill="currentColor" />
+        </svg>
+      );
+    case "eye":
+      return (
+        <svg aria-hidden="true" className={classes} viewBox="0 0 24 24">
+          <path
+            d="M2.5 12s3.4-5.5 9.5-5.5 9.5 5.5 9.5 5.5-3.4 5.5-9.5 5.5S2.5 12 2.5 12Z"
+            fill="none"
+            stroke="currentColor"
+            strokeLinejoin="round"
+            strokeWidth="2"
+          />
+          <circle cx="12" cy="12" fill="none" r="2.7" stroke="currentColor" strokeWidth="2" />
+        </svg>
+      );
+    case "eyeOff":
+      return (
+        <svg aria-hidden="true" className={classes} viewBox="0 0 24 24">
+          <path
+            d="m3.5 3.5 17 17"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeWidth="2"
+          />
+          <path
+            d="M6.8 6.8A13.6 13.6 0 0 0 2.5 12s3.4 5.5 9.5 5.5c2 0 3.7-.6 5-1.4"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+          />
+          <path
+            d="M10.1 6.7a9.9 9.9 0 0 1 1.9-.2c6.1 0 9.5 5.5 9.5 5.5a16 16 0 0 1-2.7 3.3"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+          />
+        </svg>
+      );
+    case "plus":
+      return (
+        <svg aria-hidden="true" className={classes} viewBox="0 0 24 24">
+          <path
+            d="M12 5v14M5 12h14"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeWidth="2.2"
+          />
+        </svg>
+      );
+    case "close":
+      return (
+        <svg aria-hidden="true" className={classes} viewBox="0 0 24 24">
+          <path
+            d="m6 6 12 12M18 6 6 18"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeWidth="2.2"
+          />
+        </svg>
+      );
+    default:
+      return null;
+  }
+}
+
+function AssetIcon({ name, className = "" }) {
+  const source = assetIcons[name];
+
+  if (!source) {
+    return null;
+  }
+
+  return <img alt="" aria-hidden="true" className={className ? `app-icon ${className}` : "app-icon"} src={source} />;
+}
+
+function BrandMark() {
+  return (
+    <span aria-hidden="true" className="brand-mark">
+      <AssetIcon name="vehicle" />
+    </span>
+  );
+}
+
 function PasswordField({
   label,
   value,
@@ -161,7 +555,9 @@ function PasswordField({
   error = "",
   autoComplete,
   inputAriaLabel,
-  toggleLabelPrefix
+  toggleLabelPrefix,
+  placeholder = "",
+  leadingIcon = ""
 }) {
   const [isVisible, setIsVisible] = useState(false);
   const inputLabel = inputAriaLabel ?? label;
@@ -170,10 +566,12 @@ function PasswordField({
   return (
     <label className="field">
       <span>{label}</span>
-      <div className="password-input-row">
+      <div className={leadingIcon ? "password-input-row input-with-leading" : "password-input-row"}>
+        {leadingIcon ? <AssetIcon name={leadingIcon} className="input-leading-icon" /> : null}
         <input
           aria-label={inputLabel}
           autoComplete={autoComplete}
+          placeholder={placeholder}
           type={isVisible ? "text" : "password"}
           value={value}
           onChange={onChange}
@@ -184,11 +582,77 @@ function PasswordField({
           type="button"
           onClick={() => setIsVisible((current) => !current)}
         >
-          {isVisible ? "隐藏" : "显示"}
+          {isVisible ? <AppIcon name="eyeOff" /> : <AssetIcon name="eye" />}
         </button>
       </div>
       {error ? <small className="error">{error}</small> : null}
     </label>
+  );
+}
+
+function SheetHeader({ title, eyebrow = "", onClose }) {
+  return (
+    <div className="sheet-header">
+      <div>
+        {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
+        <h2>{title}</h2>
+      </div>
+      {onClose ? (
+        <button
+          aria-label={`关闭${title}`}
+          className="icon-button"
+          type="button"
+          onClick={onClose}
+        >
+          <AssetIcon name="close" />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function BottomSheet({ open, title, ariaLabel, onClose, children }) {
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div className="modal-overlay bottom-sheet-overlay" role="presentation">
+      <section
+        aria-label={ariaLabel ?? title}
+        aria-modal="true"
+        className="bottom-sheet"
+        role="dialog"
+      >
+        <SheetHeader title={title} onClose={onClose} />
+        <div className="bottom-sheet-body">{children}</div>
+      </section>
+    </div>
+  );
+}
+
+function ConfirmDeleteModal({ open, title, body, ariaLabel, onCancel, onConfirm }) {
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <BottomSheet open={open} title={title} ariaLabel={ariaLabel} onClose={onCancel}>
+        <div className="confirm-modal-body">
+          <div className="confirm-modal-icon">
+            <AppIcon name="warning" />
+          </div>
+          <p>{body}</p>
+        </div>
+        <div className="confirm-modal-actions">
+          <button className="ghost-button" type="button" onClick={onCancel}>
+            取消
+          </button>
+          <button className="danger-button" type="button" onClick={onConfirm}>
+            确认删除
+          </button>
+        </div>
+    </BottomSheet>
   );
 }
 
@@ -245,6 +709,7 @@ export function App() {
   const [pendingDeleteVehicle, setPendingDeleteVehicle] = useState(null);
   const [pendingDeleteRecord, setPendingDeleteRecord] = useState(null);
   const [selectedRecordIds, setSelectedRecordIds] = useState([]);
+  const [expandedRecordId, setExpandedRecordId] = useState("");
   const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
   const [recordFilters, setRecordFilters] = useState({
     keyword: "",
@@ -310,6 +775,7 @@ export function App() {
     setIsAddVehicleOpen(false);
     setPendingDeleteVehicle(null);
     setPendingDeleteRecord(null);
+    setExpandedRecordId("");
     setIsBulkDeleteOpen(false);
   }
 
@@ -372,6 +838,7 @@ export function App() {
   function updateRecordFilter(field, value) {
     setSelectedRecordIds([]);
     setPendingDeleteRecord(null);
+    setExpandedRecordId("");
     setIsBulkDeleteOpen(false);
     setRecordFilters((current) => ({
       ...current,
@@ -382,6 +849,7 @@ export function App() {
   function clearRecordFilters() {
     setSelectedRecordIds([]);
     setPendingDeleteRecord(null);
+    setExpandedRecordId("");
     setIsBulkDeleteOpen(false);
     setRecordFilters({
       keyword: "",
@@ -657,7 +1125,7 @@ export function App() {
 
   function openAdminPasswordModule() {
     resetAdminModuleState();
-    setView(adminPasswordView);
+    setIsPasswordDialogOpen(true);
   }
 
   async function handleCreateUser(event) {
@@ -816,6 +1284,7 @@ export function App() {
 
     setManagedRecords((current) => current.filter((record) => record.id !== pendingDeleteRecord.id));
     setPendingDeleteRecord(null);
+    setExpandedRecordId((current) => (current === pendingDeleteRecord.id ? "" : current));
     setUserManagementMessage("记录已删除");
 
     if (deletedVehicleId === selectedVehicleId) {
@@ -847,6 +1316,7 @@ export function App() {
     setManagedRecords((current) =>
       current.filter((record) => !selectedRecordIds.includes(record.id))
     );
+    setExpandedRecordId((current) => (selectedRecordIds.includes(current) ? "" : current));
     setSelectedRecordIds([]);
     setIsBulkDeleteOpen(false);
     setUserManagementMessage(body.message ?? "记录已批量删除");
@@ -1038,40 +1508,91 @@ export function App() {
   const areAllFilteredRecordsSelected =
     filteredManagedRecords.length > 0 &&
     filteredManagedRecords.every((record) => selectedRecordIds.includes(record.id));
+  const deleteModalConfig = pendingDeleteUser
+    ? {
+        ariaLabel: "删除用户确认",
+        body: `确认删除账号「${pendingDeleteUser.username}」？此操作不可撤销。`,
+        onCancel: () => setPendingDeleteUser(null),
+        onConfirm: confirmDeleteUser
+      }
+    : pendingDeleteVehicle
+      ? {
+          ariaLabel: "删除车辆确认",
+          body: `确认删除车辆「${pendingDeleteVehicle.vehicleCode}」？此操作不可撤销。`,
+          onCancel: () => setPendingDeleteVehicle(null),
+          onConfirm: confirmDeleteVehicle
+        }
+      : pendingDeleteRecord
+        ? {
+            ariaLabel: "删除记录确认",
+            body: `确认删除记录「${summarizeRecord(pendingDeleteRecord)}」？此操作不可撤销。`,
+            onCancel: () => setPendingDeleteRecord(null),
+            onConfirm: confirmDeleteRecord
+          }
+        : isBulkDeleteOpen
+          ? {
+              ariaLabel: "批量删除记录确认",
+              body: `确认删除已选 ${selectedRecordIds.length} 条记录？此操作不可撤销。`,
+              onCancel: () => setIsBulkDeleteOpen(false),
+              onConfirm: confirmBatchDeleteRecords
+            }
+          : null;
 
   if (!user) {
     return (
-      <main className="shell">
-        <section className="panel auth-panel">
-          <p className="eyebrow">Issue 1</p>
-          <h1>公务用车使用登记系统</h1>
-          <p className="lede">请使用账号密码登录，进入用车登记工作台。</p>
+      <main className="shell shell-login">
+        <section className="auth-layout">
+          <header className="page-hero auth-hero">
+            <div className="brand-row brand-row-centered">
+              <BrandMark />
+            </div>
+            <h1>公务用车管理平台</h1>
+            <p className="hero-badge">登记专用</p>
+            <p className="hero-subtitle">请使用账号密码登录，进入用车管理工作台</p>
+          </header>
 
-          <form className="form" onSubmit={handleLogin} noValidate>
-            <label className="field">
-              <span>账号</span>
-              <input
-                autoComplete="username"
-                value={loginForm.username}
-                onChange={(event) => updateLoginField("username", event.target.value)}
+          <section className="page-surface auth-surface">
+            <form className="sheet-card auth-card form" onSubmit={handleLogin} noValidate>
+              <SheetHeader title="账号登录" />
+
+              <label className="field">
+                <span>账号</span>
+                <div className="input-with-leading">
+                  <AssetIcon name="account" className="input-leading-icon" />
+                  <input
+                    autoComplete="username"
+                    placeholder="请输入账号"
+                    value={loginForm.username}
+                    onChange={(event) => updateLoginField("username", event.target.value)}
+                  />
+                </div>
+                {loginErrors.username ? <small className="error">{loginErrors.username}</small> : null}
+              </label>
+
+              <PasswordField
+                autoComplete="current-password"
+                error={loginErrors.password}
+                label="密码"
+                leadingIcon="password"
+                placeholder="请输入密码"
+                value={loginForm.password}
+                onChange={(event) => updateLoginField("password", event.target.value)}
               />
-              {loginErrors.username ? <small className="error">{loginErrors.username}</small> : null}
-            </label>
 
-            <PasswordField
-              autoComplete="current-password"
-              error={loginErrors.password}
-              label="密码"
-              value={loginForm.password}
-              onChange={(event) => updateLoginField("password", event.target.value)}
-            />
+              {loginMessage ? <p className="message banner-message">{loginMessage}</p> : null}
 
-            {loginMessage ? <p className="message">{loginMessage}</p> : null}
+              <button className="primary-button primary-button-large" type="submit">
+                登录
+              </button>
+            </form>
 
-            <button className="primary-button" type="submit">
-              登录
-            </button>
-          </form>
+            <div className="notice-card">
+              <AppIcon name="shield" className="notice-icon" />
+              <p>本系统为内部专用，账号信息请妥善保管，禁止转借他人使用</p>
+            </div>
+
+            <p className="copyright">© 2026 公务用车管理平台 · 版权所有</p>
+          </section>
         </section>
       </main>
     );
@@ -1080,856 +1601,959 @@ export function App() {
   if (user.role !== "admin") {
     return (
       <main className="shell">
-        <section className="panel workspace-panel">
-          <div>
-            <p className="eyebrow">登记工作台</p>
+        <section className="app-shell">
+          <header className="page-hero employee-hero">
+            <div className="brand-row">
+              <span aria-hidden="true" className="brand-mark">
+                <AssetIcon name="employeeHeaderCar" />
+              </span>
+              <span className="brand-title">公务用车管理平台</span>
+            </div>
             <h1>公务用车使用登记</h1>
-            <p className="lede">填写当次用车信息后提交，系统会按车辆独立维护默认起步公里。</p>
-          </div>
+            <p className="hero-subtitle">填写当次用车信息后提交，系统会按车辆独立维护默认起步公里。</p>
+          </header>
 
-          <div className="identity-card" aria-label="当前登录信息">
-            <p>当前用户：{user.username}</p>
-            <p>当前角色：{roleLabels[user.role] ?? user.role}</p>
-          </div>
+          <div className="page-surface">
+            <section className="summary-card identity-card" aria-label="当前登录信息">
+              <div className="summary-leading">
+                <span className="summary-icon">
+                  <AppIcon name="user" />
+                </span>
+                <div>
+                  <p>当前用户：{user.username}</p>
+                  <p>当前角色：{roleLabels[user.role] ?? user.role}</p>
+                </div>
+              </div>
+            </section>
 
-          <form className="form registry-form" onSubmit={handleRegistrySubmit} noValidate>
-            <label className="field registry-vehicle-field">
-              <span>车辆</span>
-              <select
-                aria-label="车辆"
-                value={selectedVehicleId}
-                onChange={(event) => {
-                  setSelectedVehicleId(event.target.value);
-                  setRegistryMessage("");
-                }}
-              >
-                {vehicles.length === 0 ? <option value="">暂无可用车辆</option> : null}
-                {vehicles.map((vehicle) => (
-                  <option key={vehicle.id} value={vehicle.id}>
-                    {vehicle.vehicleCode} + {vehicle.plateNumber}
-                  </option>
-                ))}
-              </select>
-              {registryErrors.vehicleId ? <small className="error">{registryErrors.vehicleId}</small> : null}
-            </label>
-
-            <div className="field-grid">
-              <label className="field">
-                <span>日期</span>
-                <input
-                  aria-label="日期"
-                  type="date"
-                  value={registryForm.businessDate}
-                  onChange={(event) => updateRegistryField("businessDate", event.target.value)}
-                />
-                {registryErrors.businessDate ? (
-                  <small className="error">{registryErrors.businessDate}</small>
-                ) : null}
-              </label>
-              <label className="field">
-                <span>出车时间</span>
-                <input
-                  aria-label="出车时间"
-                  data-testid="registry-departure-time"
-                  type="datetime-local"
-                  value={registryForm.departureTime}
-                  onChange={(event) => updateRegistryField("departureTime", event.target.value)}
-                />
-                {registryErrors.departureTime ? (
-                  <small className="error">{registryErrors.departureTime}</small>
-                ) : null}
-              </label>
-              <label className="field">
-                <span>还车时间</span>
-                <input
-                  aria-label="还车时间"
-                  data-testid="registry-return-time"
-                  type="datetime-local"
-                  value={registryForm.returnTime}
-                  onChange={(event) => updateRegistryField("returnTime", event.target.value)}
-                />
-                {registryErrors.returnTime ? (
-                  <small className="error">{registryErrors.returnTime}</small>
-                ) : null}
-              </label>
-              <label className="field">
-                <span>事由</span>
-                <input
-                  aria-label="事由"
-                  value={registryForm.reason}
-                  onChange={(event) => updateRegistryField("reason", event.target.value)}
-                />
-                {registryErrors.reason ? <small className="error">{registryErrors.reason}</small> : null}
-              </label>
-              <label className="field field-span-2">
-                <span>目的地及行车路线</span>
-                <input
-                  aria-label="目的地及行车路线"
-                  value={registryForm.route}
-                  onChange={(event) => updateRegistryField("route", event.target.value)}
-                />
-                {registryErrors.route ? <small className="error">{registryErrors.route}</small> : null}
-              </label>
-              <label className="field">
-                <span>起步公里读数</span>
-                <input
-                  aria-label="起步公里读数"
-                  type="number"
-                  min="0"
-                  value={registryForm.startMileage}
-                  onChange={(event) => updateRegistryField("startMileage", event.target.value)}
-                />
-                {registryErrors.startMileage ? (
-                  <small className="error">{registryErrors.startMileage}</small>
-                ) : null}
-              </label>
-              <label className="field">
-                <span>终点公里读数</span>
-                <input
-                  aria-label="终点公里读数"
-                  type="number"
-                  min="0"
-                  value={registryForm.endMileage}
-                  onChange={(event) => updateRegistryField("endMileage", event.target.value)}
-                />
-                {registryErrors.endMileage ? (
-                  <small className="error">{registryErrors.endMileage}</small>
-                ) : null}
-              </label>
-              <label className="field">
-                <span>行车公里数</span>
-                <input aria-label="行车公里数" readOnly type="number" value={registryForm.distance} />
-              </label>
-              <label className="field">
-                <span>驾驶员签字</span>
-                <input
-                  aria-label="驾驶员签字"
-                  value={registryForm.driverSignature}
-                  onChange={(event) => updateRegistryField("driverSignature", event.target.value)}
-                />
-                {registryErrors.driverSignature ? (
-                  <small className="error">{registryErrors.driverSignature}</small>
-                ) : null}
-              </label>
-              <label className="field">
-                <span>加油费用（元）</span>
-                <input
-                  aria-label="加油费用（元）"
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={registryForm.fuelFee}
-                  onChange={(event) => updateRegistryField("fuelFee", event.target.value)}
-                />
-              </label>
-              <label className="field">
-                <span>加油数量（升）</span>
-                <input
-                  aria-label="加油数量（升）"
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={registryForm.fuelVolume}
-                  onChange={(event) => updateRegistryField("fuelVolume", event.target.value)}
-                />
-              </label>
-              <label className="field field-span-2">
-                <span>备注</span>
-                <input
-                  aria-label="备注"
-                  value={registryForm.remark}
-                  onChange={(event) => updateRegistryField("remark", event.target.value)}
-                />
-              </label>
-            </div>
-
-            {registryMessage ? <p className="message">{registryMessage}</p> : null}
-
-            <div className="action-row">
-              <button className="primary-button" type="submit">
-                提交登记
-              </button>
-              <button
-                className="secondary-button"
-                type="button"
-                onClick={() => {
-                  const shouldOpen = !isPasswordDialogOpen;
-                  closeInlinePanels();
-                  setPasswordMessage("");
-                  setPasswordErrors({});
-                  setIsPasswordDialogOpen(shouldOpen);
-                }}
-              >
-                修改密码
-              </button>
-              <button className="ghost-button" type="button" onClick={handleLogout}>
-                退出登录
-              </button>
-            </div>
-          </form>
-
-          {isPasswordDialogOpen ? (
-            <form className="password-dialog inline-panel" onSubmit={handleChangePassword} noValidate>
-              <h2>修改密码</h2>
-              <PasswordField
-                autoComplete="current-password"
-                error={passwordErrors.currentPassword}
-                label="当前密码"
-                value={passwordForm.currentPassword}
-                onChange={(event) => updatePasswordField("currentPassword", event.target.value)}
-              />
-              <PasswordField
-                autoComplete="new-password"
-                error={passwordErrors.newPassword}
-                label="新密码"
-                value={passwordForm.newPassword}
-                onChange={(event) => updatePasswordField("newPassword", event.target.value)}
-              />
-              <PasswordField
-                autoComplete="new-password"
-                error={passwordErrors.confirmPassword}
-                label="确认新密码"
-                value={passwordForm.confirmPassword}
-                onChange={(event) => updatePasswordField("confirmPassword", event.target.value)}
-              />
-
-              {passwordMessage ? <p className="message">{passwordMessage}</p> : null}
-
-              <div className="action-row">
-                <button className="primary-button" type="submit">
-                  提交修改
-                </button>
-                <button
-                  className="ghost-button"
-                  type="button"
-                  onClick={() => {
-                    setIsPasswordDialogOpen(false);
-                    setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
-                    setPasswordErrors({});
-                    setPasswordMessage("");
+            <form
+              className="sheet-card form registry-form"
+              id="employee-registry-form"
+              onSubmit={handleRegistrySubmit}
+              noValidate
+            >
+              <label className="field registry-vehicle-field">
+                <span>车辆</span>
+                <select
+                  aria-label="车辆"
+                  value={selectedVehicleId}
+                  onChange={(event) => {
+                    setSelectedVehicleId(event.target.value);
+                    setRegistryMessage("");
                   }}
                 >
-                  取消
+                  {vehicles.length === 0 ? <option value="">暂无可用车辆</option> : null}
+                  {vehicles.map((vehicle) => (
+                    <option key={vehicle.id} value={vehicle.id}>
+                      {vehicle.vehicleCode} + {vehicle.plateNumber}
+                    </option>
+                  ))}
+                </select>
+                {registryErrors.vehicleId ? <small className="error">{registryErrors.vehicleId}</small> : null}
+              </label>
+
+              <div className="field-grid">
+                <label className="field">
+                  <span>日期</span>
+                  <input
+                    aria-label="日期"
+                    type="date"
+                    value={registryForm.businessDate}
+                    onChange={(event) => updateRegistryField("businessDate", event.target.value)}
+                  />
+                  {registryErrors.businessDate ? (
+                    <small className="error">{registryErrors.businessDate}</small>
+                  ) : null}
+                </label>
+                <label className="field">
+                  <span>出车时间</span>
+                  <input
+                    aria-label="出车时间"
+                    data-testid="registry-departure-time"
+                    type="datetime-local"
+                    value={registryForm.departureTime}
+                    onChange={(event) => updateRegistryField("departureTime", event.target.value)}
+                  />
+                  {registryErrors.departureTime ? (
+                    <small className="error">{registryErrors.departureTime}</small>
+                  ) : null}
+                </label>
+                <label className="field">
+                  <span>还车时间</span>
+                  <input
+                    aria-label="还车时间"
+                    data-testid="registry-return-time"
+                    type="datetime-local"
+                    value={registryForm.returnTime}
+                    onChange={(event) => updateRegistryField("returnTime", event.target.value)}
+                  />
+                  {registryErrors.returnTime ? (
+                    <small className="error">{registryErrors.returnTime}</small>
+                  ) : null}
+                </label>
+                <label className="field">
+                  <span>事由</span>
+                  <input
+                    aria-label="事由"
+                    placeholder="用车事由"
+                    value={registryForm.reason}
+                    onChange={(event) => updateRegistryField("reason", event.target.value)}
+                  />
+                  {registryErrors.reason ? <small className="error">{registryErrors.reason}</small> : null}
+                </label>
+                <label className="field field-span-2">
+                  <span>目的地及行车路线</span>
+                  <input
+                    aria-label="目的地及行车路线"
+                    placeholder="请填写目的地及行车路线"
+                    value={registryForm.route}
+                    onChange={(event) => updateRegistryField("route", event.target.value)}
+                  />
+                  {registryErrors.route ? <small className="error">{registryErrors.route}</small> : null}
+                </label>
+                <label className="field field-with-unit">
+                  <span>起步公里读数</span>
+                  <input
+                    aria-label="起步公里读数"
+                    placeholder="km"
+                    type="number"
+                    min="0"
+                    value={registryForm.startMileage}
+                    onChange={(event) => updateRegistryField("startMileage", event.target.value)}
+                  />
+                  {registryErrors.startMileage ? (
+                    <small className="error">{registryErrors.startMileage}</small>
+                  ) : null}
+                </label>
+                <label className="field field-with-unit">
+                  <span>终点公里读数</span>
+                  <input
+                    aria-label="终点公里读数"
+                    placeholder="km"
+                    type="number"
+                    min="0"
+                    value={registryForm.endMileage}
+                    onChange={(event) => updateRegistryField("endMileage", event.target.value)}
+                  />
+                  {registryErrors.endMileage ? (
+                    <small className="error">{registryErrors.endMileage}</small>
+                  ) : null}
+                </label>
+                <label className="field field-with-unit">
+                  <span>行车公里数</span>
+                  <input
+                    aria-label="行车公里数"
+                    placeholder="km"
+                    readOnly
+                    type="number"
+                    value={registryForm.distance}
+                  />
+                </label>
+                <label className="field">
+                  <span>驾驶员签字</span>
+                  <input
+                    aria-label="驾驶员签字"
+                    placeholder="请输入姓名"
+                    value={registryForm.driverSignature}
+                    onChange={(event) => updateRegistryField("driverSignature", event.target.value)}
+                  />
+                  {registryErrors.driverSignature ? (
+                    <small className="error">{registryErrors.driverSignature}</small>
+                  ) : null}
+                </label>
+                <label className="field">
+                  <span>加油费用（元）</span>
+                  <input
+                    aria-label="加油费用（元）"
+                    type="number"
+                    min="0"
+                    placeholder="0.00"
+                    step="any"
+                    value={registryForm.fuelFee}
+                    onChange={(event) => updateRegistryField("fuelFee", event.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span>加油数量（升）</span>
+                  <input
+                    aria-label="加油数量（升）"
+                    type="number"
+                    min="0"
+                    placeholder="0.0"
+                    step="any"
+                    value={registryForm.fuelVolume}
+                    onChange={(event) => updateRegistryField("fuelVolume", event.target.value)}
+                  />
+                </label>
+                <label className="field field-span-2">
+                  <span>备注</span>
+                  <input
+                    aria-label="备注"
+                    placeholder="选填"
+                    value={registryForm.remark}
+                    onChange={(event) => updateRegistryField("remark", event.target.value)}
+                  />
+                </label>
+              </div>
+
+              {registryMessage ? <p className="message banner-message">{registryMessage}</p> : null}
+
+              <div className="action-row action-row-split registry-actions">
+                <button className="primary-button primary-button-large" type="submit">
+                  提交登记
+                </button>
+                <button
+                  className="secondary-button secondary-button-large"
+                  type="button"
+                  onClick={() => {
+                    closeInlinePanels();
+                    setPasswordMessage("");
+                    setPasswordErrors({});
+                    setIsPasswordDialogOpen(true);
+                  }}
+                >
+                  修改密码
+                </button>
+                <button className="ghost-button ghost-button-large" type="button" onClick={handleLogout}>
+                  <AssetIcon name="employeeLogout" />
+                  <span>退出</span>
                 </button>
               </div>
             </form>
-          ) : null}
+
+          </div>
         </section>
+        <BottomSheet
+          open={isPasswordDialogOpen}
+          title="修改密码"
+          onClose={() => {
+            setIsPasswordDialogOpen(false);
+            setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+            setPasswordErrors({});
+            setPasswordMessage("");
+          }}
+        >
+          <form className="bottom-sheet-form form" onSubmit={handleChangePassword} noValidate>
+            <PasswordField
+              autoComplete="current-password"
+              error={passwordErrors.currentPassword}
+              label="当前密码"
+              placeholder="请输入当前密码"
+              value={passwordForm.currentPassword}
+              onChange={(event) => updatePasswordField("currentPassword", event.target.value)}
+            />
+            <PasswordField
+              autoComplete="new-password"
+              error={passwordErrors.newPassword}
+              label="新密码"
+              placeholder="请输入新密码"
+              value={passwordForm.newPassword}
+              onChange={(event) => updatePasswordField("newPassword", event.target.value)}
+            />
+            <PasswordField
+              autoComplete="new-password"
+              error={passwordErrors.confirmPassword}
+              label="确认新密码"
+              placeholder="请再次输入新密码"
+              value={passwordForm.confirmPassword}
+              onChange={(event) => updatePasswordField("confirmPassword", event.target.value)}
+            />
+
+            {passwordMessage ? <p className="message banner-message">{passwordMessage}</p> : null}
+
+            <div className="action-row sheet-actions sheet-actions-primary-only">
+              <button className="primary-button primary-button-large" type="submit">
+                提交修改
+              </button>
+            </div>
+          </form>
+        </BottomSheet>
+        <ConfirmDeleteModal
+          {...(deleteModalConfig ?? {})}
+          open={Boolean(deleteModalConfig)}
+          title="确认删除"
+        />
       </main>
     );
   }
 
   return (
     <main className="shell">
-      <section className="panel workspace-panel">
-        <div>
-          <p className="eyebrow">管理工作台</p>
-          <h1>管理员管理工作台</h1>
-        </div>
-
-        <div className="identity-card" aria-label="当前登录信息">
-          <p>当前用户：{user.username}</p>
-          <p>当前角色：{roleLabels[user.role] ?? user.role}</p>
-        </div>
-
-        <div className="action-row admin-toolbar">
-          {view !== adminHomeView ? (
-            <button className="secondary-button" type="button" onClick={openAdminHome}>
-              返回管理首页
-            </button>
-          ) : null}
-          <button className="ghost-button" type="button" onClick={handleLogout}>
-            退出登录
-          </button>
-        </div>
-
-        {view === adminHomeView ? (
-          <section className="management-panel" aria-label="管理员导航">
-            {userManagementMessage ? <p className="message">{userManagementMessage}</p> : null}
-
-            <div className="admin-nav-grid">
-              <button className="secondary-button admin-nav-card" type="button" onClick={openAdminUsers}>
-                用户账号管理
-              </button>
-              <button className="secondary-button admin-nav-card" type="button" onClick={openAdminVehicles}>
-                公车档案管理
-              </button>
-              <button className="secondary-button admin-nav-card" type="button" onClick={openAdminRecords}>
-                用车记录管理
-              </button>
-              <button className="secondary-button admin-nav-card" type="button" onClick={openAdminPasswordModule}>
-                修改密码
-              </button>
+      {view === adminHomeView ? (
+        <section className="app-shell">
+          <header className="page-hero admin-hero">
+            <div className="brand-row admin-home-brand-row">
+              <span aria-hidden="true" className="admin-home-brand-mark">
+                <AssetIcon name="adminHeaderCar" />
+              </span>
+              <span className="brand-title">公务用车管理平台</span>
             </div>
-          </section>
-        ) : null}
+            <h1>管理员工作台</h1>
+            <p className="admin-home-subtitle">请选择要进入的管理模块</p>
+          </header>
 
-        {view === adminUsersView ? (
-          <section className="management-panel" aria-label="用户账号管理">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">管理模块</p>
-                <h2>用户账号管理</h2>
+          <div className="page-surface">
+            <section className="summary-card summary-card-with-action" aria-label="当前登录信息">
+              <div className="summary-leading summary-leading-bar">
+                <div>
+                  <p>当前用户：{user.username}</p>
+                  <p>当前角色：{roleLabels[user.role] ?? user.role}</p>
+                </div>
               </div>
+              <button className="ghost-button ghost-button-danger" type="button" onClick={handleLogout}>
+                退出登录
+              </button>
+            </section>
+
+            {userManagementMessage ? <p className="message banner-message">{userManagementMessage}</p> : null}
+
+            <section className="nav-card-list" aria-label="管理员导航">
+              <button className="module-nav-card" type="button" onClick={openAdminUsers}>
+                <span className="module-nav-icon">
+                  <AssetIcon name="adminUsers" />
+                </span>
+                <span className="module-nav-copy">
+                  <strong>用户账号管理</strong>
+                </span>
+                <AppIcon name="chevronRight" className="module-nav-chevron" />
+              </button>
+              <button className="module-nav-card" type="button" onClick={openAdminVehicles}>
+                <span className="module-nav-icon">
+                  <AssetIcon name="adminVehicles" />
+                </span>
+                <span className="module-nav-copy">
+                  <strong>公车档案管理</strong>
+                </span>
+                <AppIcon name="chevronRight" className="module-nav-chevron" />
+              </button>
+              <button className="module-nav-card" type="button" onClick={openAdminRecords}>
+                <span className="module-nav-icon">
+                  <AssetIcon name="adminRecords" />
+                </span>
+                <span className="module-nav-copy">
+                  <strong>用车记录管理</strong>
+                </span>
+                <AppIcon name="chevronRight" className="module-nav-chevron" />
+              </button>
+              <button className="module-nav-card" type="button" onClick={openAdminPasswordModule}>
+                <span className="module-nav-icon">
+                  <AssetIcon name="adminPassword" />
+                </span>
+                <span className="module-nav-copy">
+                  <strong>修改密码</strong>
+                </span>
+                <AppIcon name="chevronRight" className="module-nav-chevron" />
+              </button>
+            </section>
+          </div>
+        </section>
+      ) : null}
+
+      {view !== adminHomeView ? (
+        <section className="module-shell">
+          <div className="module-topbar">
+            <button
+              aria-label="返回管理首页"
+              className="icon-button module-back-button"
+              type="button"
+              onClick={openAdminHome}
+            >
+              <AssetIcon name="navBack" />
+            </button>
+            <div className="module-topbar-copy">
+              <p className="eyebrow">管理模块</p>
+              <h1>
+                {view === adminUsersView
+                  ? "用户账号管理"
+                  : view === adminVehiclesView
+                    ? "公车档案管理"
+                    : view === adminRecordsView
+                      ? "用车记录管理"
+                      : "修改密码"}
+              </h1>
+            </div>
+            {view === adminUsersView ? (
               <button
-                className="primary-button"
+                className="primary-button module-topbar-action"
                 type="button"
                 onClick={() => {
-                  const shouldOpen = !isAddUserOpen;
                   closeInlinePanels();
                   setNewUserErrors({});
                   setUserManagementMessage("");
-                  setIsAddUserOpen(shouldOpen);
+                  setIsAddUserOpen(true);
                 }}
               >
-                新增用户
+                <AssetIcon name="navPlus" />
+                <span>新增用户</span>
               </button>
-            </div>
-
-            {userManagementMessage ? <p className="message">{userManagementMessage}</p> : null}
-
-            <div className="user-list">
-              {managedUsers.length === 0 ? <p className="empty-state">暂无用户</p> : null}
-              {managedUsers.map((managedUser) => {
-                const canResetPassword =
-                  managedUser.username !== user.username &&
-                  (managedUser.role === "employee" || user.username === "admin");
-                const canDeleteUser =
-                  !managedUser.isBuiltinAdmin &&
-                  !(managedUser.username === user.username && user.username !== "admin");
-
-                return (
-                  <article className="user-row" key={managedUser.id}>
-                    <div>
-                      <strong>{managedUser.username}</strong>
-                      <p>{roleLabels[managedUser.role] ?? managedUser.role}</p>
-                      {managedUser.isBuiltinAdmin ? <small>内置账号</small> : null}
-                    </div>
-                    <div className="action-row">
-                      {canResetPassword ? (
-                        <button
-                          aria-label={`重置密码 ${managedUser.username}`}
-                          className="secondary-button"
-                          type="button"
-                          onClick={() => {
-                            const isCurrent = resetUser?.id === managedUser.id;
-                            closeInlinePanels();
-                            setResetPasswordErrors({});
-                            setResetPasswordForm({ newPassword: "", confirmPassword: "" });
-                            setUserManagementMessage("");
-                            setResetUser(isCurrent ? null : managedUser);
-                          }}
-                        >
-                          重置密码
-                        </button>
-                      ) : null}
-                      {!managedUser.isBuiltinAdmin ||
-                      (managedUser.username === user.username && user.username !== "admin") ? (
-                        <button
-                          aria-label={`删除 ${managedUser.username}`}
-                          className="ghost-button"
-                          type="button"
-                          onClick={() => {
-                            if (managedUser.username === user.username && user.username !== "admin") {
-                              setUserManagementMessage("不能删除当前登录管理员账号");
-                              return;
-                            }
-
-                            const isCurrent = pendingDeleteUser?.id === managedUser.id;
-                            closeInlinePanels();
-                            setUserManagementMessage("");
-                            setPendingDeleteUser(isCurrent ? null : managedUser);
-                          }}
-                        >
-                          删除
-                        </button>
-                      ) : null}
-                      {!canDeleteUser && managedUser.id === user.id && user.username !== "admin" ? (
-                        <small>当前账号不可自删</small>
-                      ) : null}
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-
-            {isAddUserOpen ? (
-              <form className="password-dialog inline-panel" onSubmit={handleCreateUser} noValidate>
-                <h2>新增用户</h2>
-                <label className="field">
-                  <span>新账号</span>
-                  <input
-                    autoComplete="off"
-                    value={newUserForm.username}
-                    onChange={(event) => updateNewUserField("username", event.target.value)}
-                  />
-                  {newUserErrors.username ? <small className="error">{newUserErrors.username}</small> : null}
-                </label>
-                <PasswordField
-                  autoComplete="new-password"
-                  error={newUserErrors.password}
-                  label="初始密码"
-                  value={newUserForm.password}
-                  onChange={(event) => updateNewUserField("password", event.target.value)}
-                />
-                <label className="field">
-                  <span>角色</span>
-                  <select
-                    value={newUserForm.role}
-                    onChange={(event) => updateNewUserField("role", event.target.value)}
-                  >
-                    <option value="employee">普通员工</option>
-                    <option value="admin">管理员</option>
-                  </select>
-                  {newUserErrors.role ? <small className="error">{newUserErrors.role}</small> : null}
-                </label>
-                <div className="action-row">
-                  <button className="primary-button" type="submit">
-                    提交新增
-                  </button>
-                  <button
-                    className="ghost-button"
-                    type="button"
-                    onClick={() => {
-                      setIsAddUserOpen(false);
-                      setNewUserErrors({});
-                      setNewUserForm({ username: "", password: "", role: "employee" });
-                    }}
-                  >
-                    取消
-                  </button>
-                </div>
-              </form>
             ) : null}
-
-            {pendingDeleteUser ? (
-              <section className="password-dialog inline-panel" aria-label="删除用户确认">
-                <h2>删除用户</h2>
-                <p>确认删除 {pendingDeleteUser.username}？</p>
-                <div className="action-row">
-                  <button className="primary-button" type="button" onClick={confirmDeleteUser}>
-                    确认删除
-                  </button>
-                  <button className="ghost-button" type="button" onClick={() => setPendingDeleteUser(null)}>
-                    取消删除
-                  </button>
-                </div>
-              </section>
-            ) : null}
-
-            {resetUser ? (
-              <form className="password-dialog inline-panel" onSubmit={handleResetPassword} noValidate>
-                <h2>重置 {resetUser.username} 密码</h2>
-                <PasswordField
-                  autoComplete="new-password"
-                  error={resetPasswordErrors.newPassword}
-                  label="重置新密码"
-                  value={resetPasswordForm.newPassword}
-                  onChange={(event) => updateResetPasswordField("newPassword", event.target.value)}
-                />
-                <PasswordField
-                  autoComplete="new-password"
-                  error={resetPasswordErrors.confirmPassword}
-                  label="确认重置密码"
-                  value={resetPasswordForm.confirmPassword}
-                  onChange={(event) => updateResetPasswordField("confirmPassword", event.target.value)}
-                />
-                <div className="action-row">
-                  <button className="primary-button" type="submit">
-                    提交重置
-                  </button>
-                  <button
-                    className="ghost-button"
-                    type="button"
-                    onClick={() => {
-                      setResetUser(null);
-                      setResetPasswordErrors({});
-                      setResetPasswordForm({ newPassword: "", confirmPassword: "" });
-                    }}
-                  >
-                    取消
-                  </button>
-                </div>
-              </form>
-            ) : null}
-          </section>
-        ) : null}
-
-        {view === adminVehiclesView ? (
-          <section className="management-panel" aria-label="公车档案管理">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">管理模块</p>
-                <h2>公车档案管理</h2>
-              </div>
+            {view === adminVehiclesView ? (
               <button
-                className="primary-button"
+                className="primary-button module-topbar-action"
                 type="button"
                 onClick={() => {
-                  const shouldOpen = !isAddVehicleOpen;
                   closeInlinePanels();
                   setVehicleErrors({});
                   setUserManagementMessage("");
-                  setIsAddVehicleOpen(shouldOpen);
+                  setIsAddVehicleOpen(true);
                 }}
               >
-                新增车辆
+                <AssetIcon name="navPlus" />
+                <span>新增车辆</span>
               </button>
-            </div>
-
-            {userManagementMessage ? <p className="message">{userManagementMessage}</p> : null}
-
-            <div className="user-list">
-              {vehicles.length === 0 ? <p className="empty-state">暂无车辆</p> : null}
-              {vehicles.map((vehicle) => (
-                <article className="user-row" key={vehicle.id}>
-                  <div>
-                    <strong>{vehicle.vehicleCode}</strong>
-                    <p>{vehicle.plateNumber}</p>
-                    <small>{vehicle.brandModel}</small>
-                  </div>
-                  <div className="action-row">
-                    <button
-                      aria-label={`删除车辆 ${vehicle.vehicleCode}`}
-                      className="ghost-button"
-                      type="button"
-                      onClick={() => {
-                        const isCurrent = pendingDeleteVehicle?.id === vehicle.id;
-                        closeInlinePanels();
-                        setUserManagementMessage("");
-                        setPendingDeleteVehicle(isCurrent ? null : vehicle);
-                      }}
-                    >
-                      删除
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
-
-            {isAddVehicleOpen ? (
-              <form className="password-dialog inline-panel" onSubmit={handleCreateVehicle} noValidate>
-                <h2>新增车辆</h2>
-                <label className="field">
-                  <span>车辆编号</span>
-                  <input
-                    autoComplete="off"
-                    value={vehicleForm.vehicleCode}
-                    onChange={(event) => updateVehicleField("vehicleCode", event.target.value)}
-                  />
-                  {vehicleErrors.vehicleCode ? (
-                    <small className="error">{vehicleErrors.vehicleCode}</small>
-                  ) : null}
-                </label>
-                <label className="field">
-                  <span>车牌号码</span>
-                  <input
-                    autoComplete="off"
-                    value={vehicleForm.plateNumber}
-                    onChange={(event) => updateVehicleField("plateNumber", event.target.value)}
-                  />
-                  {vehicleErrors.plateNumber ? (
-                    <small className="error">{vehicleErrors.plateNumber}</small>
-                  ) : null}
-                </label>
-                <label className="field">
-                  <span>品牌型号</span>
-                  <input
-                    autoComplete="off"
-                    value={vehicleForm.brandModel}
-                    onChange={(event) => updateVehicleField("brandModel", event.target.value)}
-                  />
-                  {vehicleErrors.brandModel ? (
-                    <small className="error">{vehicleErrors.brandModel}</small>
-                  ) : null}
-                </label>
-                <div className="action-row">
-                  <button className="primary-button" type="submit">
-                    提交车辆
-                  </button>
-                  <button
-                    className="ghost-button"
-                    type="button"
-                    onClick={() => {
-                      setIsAddVehicleOpen(false);
-                      setVehicleErrors({});
-                      setVehicleForm({ vehicleCode: "", plateNumber: "", brandModel: "" });
-                    }}
-                  >
-                    取消
-                  </button>
-                </div>
-              </form>
             ) : null}
+            {view === adminRecordsView ? (
+              <button
+                aria-label="导出 Excel"
+                className="danger-button module-topbar-action"
+                type="button"
+                onClick={handleExportRecords}
+              >
+                <AssetIcon name="export" />
+                <span>导出</span>
+              </button>
+            ) : null}
+          </div>
 
-            {pendingDeleteVehicle ? (
-              <section className="password-dialog inline-panel" aria-label="删除车辆确认">
-                <h2>删除车辆</h2>
-                <p>
-                  确认删除车辆 {pendingDeleteVehicle.vehicleCode} / {pendingDeleteVehicle.plateNumber}？
-                </p>
-                <div className="action-row">
-                  <button className="primary-button" type="button" onClick={confirmDeleteVehicle}>
-                    确认删除车辆
-                  </button>
-                  <button
-                    className="ghost-button"
-                    type="button"
-                    onClick={() => {
-                      setPendingDeleteVehicle(null);
-                    }}
-                  >
-                    取消删除车辆
-                  </button>
+          <div className="module-surface">
+            {view === adminUsersView ? (
+              <section className="management-panel" aria-label="用户账号管理">
+                <p className="module-count">共 {managedUsers.length} 个账号</p>
+                {userManagementMessage ? <p className="message banner-message">{userManagementMessage}</p> : null}
+
+                <div className="entity-list">
+                  {managedUsers.length === 0 ? <p className="empty-state">暂无用户</p> : null}
+                  {managedUsers.map((managedUser) => {
+                    const canResetPassword =
+                      managedUser.username !== user.username &&
+                      (managedUser.role === "employee" || user.username === "admin");
+                    const canDeleteUser =
+                      !managedUser.isBuiltinAdmin &&
+                      !(managedUser.username === user.username && user.username !== "admin");
+
+                    return (
+                      <article className="entity-card" key={managedUser.id}>
+                        <div className="entity-main">
+                          <span className={`entity-avatar ${managedUser.isBuiltinAdmin ? "" : "entity-avatar-soft"}`}>
+                            <AppIcon name="user" />
+                          </span>
+                          <div className="entity-copy">
+                            <div className="entity-title-row">
+                              <strong>{managedUser.username}</strong>
+                              {managedUser.isBuiltinAdmin ? <span className="status-pill">内置</span> : null}
+                            </div>
+                            <p>{roleLabels[managedUser.role] ?? managedUser.role}</p>
+                            {!canDeleteUser && managedUser.id === user.id && user.username !== "admin" ? (
+                              <small>当前账号不可自删</small>
+                            ) : null}
+                          </div>
+                        </div>
+                        <div className="action-row entity-actions">
+                          {canResetPassword ? (
+                            <button
+                              aria-label={`重置密码 ${managedUser.username}`}
+                              className="secondary-button"
+                              type="button"
+                              onClick={() => {
+                                closeInlinePanels();
+                                setResetPasswordErrors({});
+                                setResetPasswordForm({ newPassword: "", confirmPassword: "" });
+                                setUserManagementMessage("");
+                                setResetUser(managedUser);
+                              }}
+                            >
+                              重置密码
+                            </button>
+                          ) : null}
+                          {!managedUser.isBuiltinAdmin ||
+                          (managedUser.username === user.username && user.username !== "admin") ? (
+                            <button
+                              aria-label={`删除 ${managedUser.username}`}
+                              className="ghost-button ghost-button-danger"
+                              type="button"
+                              onClick={() => {
+                                if (managedUser.username === user.username && user.username !== "admin") {
+                                  setUserManagementMessage("不能删除当前登录管理员账号");
+                                  return;
+                                }
+
+                                closeInlinePanels();
+                                setUserManagementMessage("");
+                                setPendingDeleteUser(managedUser);
+                              }}
+                            >
+                              删除
+                            </button>
+                          ) : null}
+                        </div>
+                      </article>
+                    );
+                  })}
                 </div>
+
               </section>
             ) : null}
-          </section>
-        ) : null}
 
-        {view === adminRecordsView ? (
-          <section className="management-panel" aria-label="用车记录管理">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">管理模块</p>
-                <h2>用车记录管理</h2>
-              </div>
-              <button className="primary-button" type="button" onClick={handleExportRecords}>
-                导出 Excel
-              </button>
-            </div>
+            {view === adminVehiclesView ? (
+              <section className="management-panel" aria-label="公车档案管理">
+                <p className="module-count">共 {vehicles.length} 辆车辆</p>
+                {userManagementMessage ? <p className="message banner-message">{userManagementMessage}</p> : null}
 
-            {userManagementMessage ? <p className="message">{userManagementMessage}</p> : null}
+                <div className="entity-list">
+                  {vehicles.length === 0 ? <p className="empty-state">暂无车辆</p> : null}
+                  {vehicles.map((vehicle) => {
+                    const usageStatus = getVehicleUsageStatus(vehicle);
 
-            <div className="filter-grid">
-              <label className="field">
-                <span>搜索记录</span>
-                <input
-                  value={recordFilters.keyword}
-                  onChange={(event) => updateRecordFilter("keyword", event.target.value)}
-                />
-              </label>
-              <label className="field">
-                <span>按车辆筛选</span>
-                <select
-                  value={recordFilters.vehicleCode}
-                  onChange={(event) => updateRecordFilter("vehicleCode", event.target.value)}
-                >
-                  <option value="">全部车辆</option>
-                  {[...new Set(managedRecords.map((record) => record.vehicleCode))].map((vehicleCode) => (
-                    <option key={vehicleCode} value={vehicleCode}>
-                      {vehicleCode}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>按登记人筛选</span>
-                <select
-                  value={recordFilters.registrantUsername}
-                  onChange={(event) => updateRecordFilter("registrantUsername", event.target.value)}
-                >
-                  <option value="">全部登记人</option>
-                  {[...new Set(managedRecords.map((record) => record.registrantUsername))].map((username) => (
-                    <option key={username} value={username}>
-                      {username}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>按日期筛选</span>
-                <input
-                  aria-label="按日期筛选"
-                  type="date"
-                  value={recordFilters.businessDate}
-                  onChange={(event) => updateRecordFilter("businessDate", event.target.value)}
-                />
-              </label>
-            </div>
+                    return (
+                      <article className="entity-card vehicle-card" key={vehicle.id}>
+                        <div className="entity-main vehicle-card-main">
+                          <span className="vehicle-card-icon">
+                            <AssetIcon name="adminVehicleList" />
+                          </span>
+                          <div className="entity-copy vehicle-card-copy">
+                            <div className="entity-title-row vehicle-title-row">
+                              <strong>{vehicle.plateNumber}</strong>
+                              <span
+                                className={`vehicle-status-pill ${
+                                  usageStatus === "闲置" ? "vehicle-status-idle" : "vehicle-status-active"
+                                }`}
+                              >
+                                {usageStatus}
+                              </span>
+                            </div>
+                            <p>{vehicle.brandModel}</p>
+                          </div>
+                        </div>
+                        <div className="action-row entity-actions">
+                          <button
+                            aria-label={`删除车辆 ${vehicle.vehicleCode}`}
+                            className="ghost-button ghost-button-danger"
+                            type="button"
+                            onClick={() => {
+                              closeInlinePanels();
+                              setUserManagementMessage("");
+                              setPendingDeleteVehicle(vehicle);
+                            }}
+                          >
+                            删除
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
 
-            <div className="action-row">
-              <button
-                className="ghost-button"
-                type="button"
-                onClick={() => {
-                  setPendingDeleteRecord(null);
-                  setUserManagementMessage("");
-                  setIsBulkDeleteOpen(false);
-                  setSelectedRecordIds((current) =>
-                    areAllFilteredRecordsSelected ? [] : filteredManagedRecords.map((record) => record.id)
-                  );
-                }}
-              >
-                全选当前筛选结果
-              </button>
-              <button
-                className="secondary-button"
-                disabled={selectedRecordIds.length === 0}
-                type="button"
-                onClick={() => {
-                  if (selectedRecordIds.length === 0) {
-                    return;
-                  }
+              </section>
+            ) : null}
 
-                  setPendingDeleteRecord(null);
-                  setUserManagementMessage("");
-                  setIsBulkDeleteOpen((current) => !current);
-                }}
-              >
-                批量删除
-              </button>
-              <p>已选 {selectedRecordIds.length} 条</p>
-              <button className="ghost-button" type="button" onClick={clearRecordFilters}>
-                清空筛选
-              </button>
-            </div>
+            {view === adminRecordsView ? (
+              <section className="management-panel" aria-label="用车记录管理">
+                {userManagementMessage ? <p className="message banner-message">{userManagementMessage}</p> : null}
 
-            <div className="user-list">
-              {filteredManagedRecords.length === 0 ? (
-                <p className="empty-state">暂无符合条件的记录</p>
-              ) : null}
-              {filteredManagedRecords.map((record) => (
-                <article className="user-row" key={record.id}>
-                  <div>
-                    <strong role="strong">{record.reason}</strong>
-                    <p>
-                      车辆：{record.vehicleCode} / {record.plateNumber}
-                    </p>
-                    <p>登记人：{record.registrantUsername}</p>
-                    <p>路线：{record.route}</p>
-                    <p>
-                      加油：{formatFuelDisplay(record.fuelFee, record.fuelVolume)}
-                    </p>
-                    <p>驾驶员：{record.driverSignature}</p>
-                    <small>
-                      {record.businessDate} {record.departureTime}-{record.returnTime} · {record.distance} 公里
-                      {record.isCrossDay ? " · 跨天" : ""}
-                      {record.remark ? ` · ${record.remark}` : ""}
-                    </small>
-                  </div>
-                  <div className="action-row">
-                    <label className="record-select">
+                <section className="sheet-card filter-card">
+                  <div className="filter-grid filter-grid-records">
+                    <label className="field field-span-2">
+                      <span>搜索记录</span>
                       <input
-                        aria-label={`选择记录 ${record.reason}`}
-                        checked={selectedRecordIds.includes(record.id)}
-                        type="checkbox"
-                        onChange={() => {
-                          setUserManagementMessage("");
-                          setPendingDeleteRecord(null);
-                          setIsBulkDeleteOpen(false);
-                          setSelectedRecordIds((current) =>
-                            current.includes(record.id)
-                              ? current.filter((id) => id !== record.id)
-                              : [...current, record.id]
-                          );
-                        }}
+                        placeholder="搜索车牌、用车人、事由..."
+                        value={recordFilters.keyword}
+                        onChange={(event) => updateRecordFilter("keyword", event.target.value)}
                       />
-                      <span>选择</span>
                     </label>
-                    <button
-                      aria-label={`删除记录 ${record.reason}`}
-                      className="ghost-button"
-                      type="button"
-                      onClick={() => {
-                        const isCurrent = pendingDeleteRecord?.id === record.id;
-                        closeInlinePanels();
-                        setUserManagementMessage("");
-                        setPendingDeleteRecord(isCurrent ? null : record);
-                      }}
-                    >
-                      删除记录
-                    </button>
+                    <label className="field">
+                      <span>按车辆筛选</span>
+                      <select
+                        value={recordFilters.vehicleCode}
+                        onChange={(event) => updateRecordFilter("vehicleCode", event.target.value)}
+                      >
+                        <option value="">全部车辆</option>
+                        {[...new Set(managedRecords.map((record) => record.vehicleCode))].map((vehicleCode) => (
+                          <option key={vehicleCode} value={vehicleCode}>
+                            {vehicleCode}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>按登记人筛选</span>
+                      <select
+                        value={recordFilters.registrantUsername}
+                        onChange={(event) => updateRecordFilter("registrantUsername", event.target.value)}
+                      >
+                        <option value="">全部登记人</option>
+                        {[...new Set(managedRecords.map((record) => record.registrantUsername))].map((username) => (
+                          <option key={username} value={username}>
+                            {username}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field field-span-2">
+                      <span>按日期筛选</span>
+                      <input
+                        aria-label="按日期筛选"
+                        type="date"
+                        value={recordFilters.businessDate}
+                        onChange={(event) => updateRecordFilter("businessDate", event.target.value)}
+                      />
+                    </label>
                   </div>
-                </article>
-              ))}
-            </div>
-
-            {pendingDeleteRecord ? (
-              <section className="password-dialog inline-panel" aria-label="删除记录确认">
-                <h2>删除记录</h2>
-                <p>确认删除记录 {summarizeRecord(pendingDeleteRecord)}？</p>
-                <div className="action-row">
-                  <button className="primary-button" type="button" onClick={confirmDeleteRecord}>
-                    确认删除记录
+                  <button className="filter-clear-button" type="button" onClick={clearRecordFilters}>
+                    清空筛选
                   </button>
+                </section>
+
+                <div className="selection-toolbar">
                   <button
-                    className="ghost-button"
+                    aria-label="全选当前筛选结果"
+                    className="selection-toggle"
                     type="button"
                     onClick={() => {
                       setPendingDeleteRecord(null);
-                    }}
-                  >
-                    取消删除记录
-                  </button>
-                </div>
-              </section>
-            ) : null}
-
-            {isBulkDeleteOpen ? (
-              <section className="password-dialog inline-panel" aria-label="批量删除记录确认">
-                <h2>批量删除记录</h2>
-                <p>确认删除已选 {selectedRecordIds.length} 条记录？</p>
-                <div className="action-row">
-                  <button className="primary-button" type="button" onClick={confirmBatchDeleteRecords}>
-                    确认批量删除
-                  </button>
-                  <button
-                    className="ghost-button"
-                    type="button"
-                    onClick={() => {
+                      setUserManagementMessage("");
                       setIsBulkDeleteOpen(false);
+                      setSelectedRecordIds((current) =>
+                        areAllFilteredRecordsSelected ? [] : filteredManagedRecords.map((record) => record.id)
+                      );
                     }}
                   >
-                    取消批量删除
+                    <span className={`checkbox-shell ${areAllFilteredRecordsSelected ? "checkbox-shell-active" : ""}`} />
+                    <span>全选</span>
+                    <span className="selection-divider">·</span>
+                    <span>已选 {selectedRecordIds.length} 条</span>
                   </button>
+                  <div className="action-row">
+                    <button
+                      className="secondary-button"
+                      disabled={selectedRecordIds.length === 0}
+                      type="button"
+                      onClick={() => {
+                        if (selectedRecordIds.length === 0) {
+                          return;
+                        }
+
+                        setPendingDeleteRecord(null);
+                        setUserManagementMessage("");
+                        setIsBulkDeleteOpen(true);
+                      }}
+                    >
+                      批量删除
+                    </button>
+                  </div>
+                </div>
+
+                <div className="entity-list record-list">
+                  {filteredManagedRecords.length === 0 ? (
+                    <div className="empty-state empty-state-card">
+                      <span className="empty-state-icon">
+                        <AssetIcon name="emptyFile" />
+                      </span>
+                      <p>暂无符合条件的记录</p>
+                    </div>
+                  ) : null}
+                  {filteredManagedRecords.map((record) => {
+                    const isExpanded = expandedRecordId === record.id;
+
+                    return (
+                      <article className={`record-card ${isExpanded ? "record-card-expanded" : ""}`} key={record.id}>
+                          <label className="record-select record-select-card">
+                            <input
+                              aria-label={`选择记录 ${record.reason}`}
+                              checked={selectedRecordIds.includes(record.id)}
+                              type="checkbox"
+                              onChange={() => {
+                                setUserManagementMessage("");
+                                setPendingDeleteRecord(null);
+                                setIsBulkDeleteOpen(false);
+                                setSelectedRecordIds((current) =>
+                                  current.includes(record.id)
+                                    ? current.filter((id) => id !== record.id)
+                                    : [...current, record.id]
+                                );
+                              }}
+                            />
+                          </label>
+                          <button
+                            aria-expanded={isExpanded}
+                            aria-label={`查看记录 ${record.reason}`}
+                            className="record-summary-button"
+                            type="button"
+                            onClick={() => {
+                              setUserManagementMessage("");
+                              setPendingDeleteRecord(null);
+                              setExpandedRecordId((current) => (current === record.id ? "" : record.id));
+                            }}
+                          >
+                            <span className="record-card-copy">
+                              <span className="record-card-heading">
+                                <strong>{record.vehicleCode}</strong>
+                                <span>·</span>
+                                <strong>{record.registrantUsername}</strong>
+                              </span>
+                              <span className="record-card-summary">
+                                {record.businessDate} · {record.reason}
+                              </span>
+                            </span>
+                            <AppIcon name="chevronRight" className="record-card-chevron" />
+                          </button>
+                          {isExpanded ? (
+                            <div className="record-detail-panel">
+                              <small>车牌：{record.plateNumber}</small>
+                              <small>路线：{record.route}</small>
+                              <small>加油：{formatFuelDisplay(record.fuelFee, record.fuelVolume)}</small>
+                              <small>
+                                {record.departureTime}-{record.returnTime} · {record.distance} 公里
+                                {record.isCrossDay ? " · 跨天" : ""}
+                                {record.remark ? ` · ${record.remark}` : ""}
+                              </small>
+                              <button
+                                aria-label={`删除记录 ${record.reason}`}
+                                className="ghost-button ghost-button-danger record-delete-button"
+                                type="button"
+                                onClick={() => {
+                                  setUserManagementMessage("");
+                                  setPendingDeleteUser(null);
+                                  setPendingDeleteVehicle(null);
+                                  setIsBulkDeleteOpen(false);
+                                  setPendingDeleteRecord(record);
+                                }}
+                              >
+                                删除记录
+                              </button>
+                            </div>
+                          ) : null}
+                      </article>
+                    );
+                  })}
                 </div>
               </section>
             ) : null}
-          </section>
-        ) : null}
 
-        {view === adminPasswordView ? (
-          <section className="management-panel" aria-label="修改密码">
-            <div>
-              <p className="eyebrow">管理模块</p>
-              <h2>修改密码</h2>
+            {view === adminPasswordView ? (
+              <section className="management-panel" aria-label="修改密码" />
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
+      <BottomSheet
+        open={isAddUserOpen}
+        title="新增用户"
+        onClose={() => {
+          setIsAddUserOpen(false);
+          setNewUserErrors({});
+          setNewUserForm({ username: "", password: "", role: "employee" });
+        }}
+      >
+        <form className="bottom-sheet-form form" onSubmit={handleCreateUser} noValidate>
+          <label className="field">
+            <span>新账号</span>
+            <input
+              autoComplete="off"
+              placeholder="请输入账号"
+              value={newUserForm.username}
+              onChange={(event) => updateNewUserField("username", event.target.value)}
+            />
+            {newUserErrors.username ? <small className="error">{newUserErrors.username}</small> : null}
+          </label>
+          <PasswordField
+            autoComplete="new-password"
+            error={newUserErrors.password}
+            label="初始密码"
+            placeholder="请输入初始密码"
+            value={newUserForm.password}
+            onChange={(event) => updateNewUserField("password", event.target.value)}
+          />
+          <label className="field">
+            <span>角色</span>
+            <select
+              value={newUserForm.role}
+              onChange={(event) => updateNewUserField("role", event.target.value)}
+            >
+              <option value="employee">普通员工</option>
+              <option value="admin">管理员</option>
+            </select>
+            {newUserErrors.role ? <small className="error">{newUserErrors.role}</small> : null}
+          </label>
+          <div className="action-row sheet-actions sheet-actions-split">
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={() => {
+                setIsAddUserOpen(false);
+                setNewUserErrors({});
+                setNewUserForm({ username: "", password: "", role: "employee" });
+              }}
+            >
+              取消
+            </button>
+            <button className="primary-button primary-button-large" type="submit">
+              提交新增
+            </button>
+          </div>
+        </form>
+      </BottomSheet>
+
+      <BottomSheet
+        open={Boolean(resetUser)}
+        title="重置密码"
+        onClose={() => {
+          setResetUser(null);
+          setResetPasswordErrors({});
+          setResetPasswordForm({ newPassword: "", confirmPassword: "" });
+        }}
+      >
+        <form className="bottom-sheet-form form" onSubmit={handleResetPassword} noValidate>
+          {resetUser ? (
+            <div className="sheet-context-row">
+              <AssetIcon name="key" />
+              <span>账号：</span>
+              <strong>{resetUser.username}</strong>
             </div>
+          ) : null}
+          <PasswordField
+            autoComplete="new-password"
+            error={resetPasswordErrors.newPassword}
+            label="新密码"
+            placeholder="请输入新密码"
+            value={resetPasswordForm.newPassword}
+            onChange={(event) => updateResetPasswordField("newPassword", event.target.value)}
+          />
+          <PasswordField
+            autoComplete="new-password"
+            error={resetPasswordErrors.confirmPassword}
+            label="确认新密码"
+            placeholder="请再次输入新密码"
+            value={resetPasswordForm.confirmPassword}
+            onChange={(event) => updateResetPasswordField("confirmPassword", event.target.value)}
+          />
+          <div className="action-row sheet-actions sheet-actions-split">
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={() => {
+                setResetUser(null);
+                setResetPasswordErrors({});
+                setResetPasswordForm({ newPassword: "", confirmPassword: "" });
+              }}
+            >
+              取消
+            </button>
+            <button className="primary-button primary-button-large" type="submit">
+              确认重置
+            </button>
+          </div>
+        </form>
+      </BottomSheet>
 
-            <form className="password-dialog" onSubmit={handleChangePassword} noValidate>
-              <PasswordField
-                autoComplete="current-password"
-                error={passwordErrors.currentPassword}
-                label="当前密码"
-                value={passwordForm.currentPassword}
-                onChange={(event) => updatePasswordField("currentPassword", event.target.value)}
-              />
-              <PasswordField
-                autoComplete="new-password"
-                error={passwordErrors.newPassword}
-                label="新密码"
-                value={passwordForm.newPassword}
-                onChange={(event) => updatePasswordField("newPassword", event.target.value)}
-              />
-              <PasswordField
-                autoComplete="new-password"
-                error={passwordErrors.confirmPassword}
-                label="确认新密码"
-                value={passwordForm.confirmPassword}
-                onChange={(event) => updatePasswordField("confirmPassword", event.target.value)}
-              />
+      <BottomSheet
+        open={isAddVehicleOpen}
+        title="新增车辆"
+        onClose={() => {
+          setIsAddVehicleOpen(false);
+          setVehicleErrors({});
+          setVehicleForm({ vehicleCode: "", plateNumber: "", brandModel: "" });
+        }}
+      >
+        <form className="bottom-sheet-form form" onSubmit={handleCreateVehicle} noValidate>
+          <label className="field">
+            <span>车辆编号</span>
+            <input
+              autoComplete="off"
+              placeholder="例如：CAR-001"
+              value={vehicleForm.vehicleCode}
+              onChange={(event) => updateVehicleField("vehicleCode", event.target.value)}
+            />
+            {vehicleErrors.vehicleCode ? <small className="error">{vehicleErrors.vehicleCode}</small> : null}
+          </label>
+          <label className="field">
+            <span>车牌号码</span>
+            <input
+              autoComplete="off"
+              placeholder="例如：京A12345"
+              value={vehicleForm.plateNumber}
+              onChange={(event) => updateVehicleField("plateNumber", event.target.value)}
+            />
+            {vehicleErrors.plateNumber ? <small className="error">{vehicleErrors.plateNumber}</small> : null}
+          </label>
+          <label className="field">
+            <span>品牌型号</span>
+            <input
+              autoComplete="off"
+              placeholder="请输入品牌型号"
+              value={vehicleForm.brandModel}
+              onChange={(event) => updateVehicleField("brandModel", event.target.value)}
+            />
+            {vehicleErrors.brandModel ? <small className="error">{vehicleErrors.brandModel}</small> : null}
+          </label>
+          <div className="action-row sheet-actions sheet-actions-split">
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={() => {
+                setIsAddVehicleOpen(false);
+                setVehicleErrors({});
+                setVehicleForm({ vehicleCode: "", plateNumber: "", brandModel: "" });
+              }}
+            >
+              取消
+            </button>
+            <button className="primary-button primary-button-large" type="submit">
+              提交新增
+            </button>
+          </div>
+        </form>
+      </BottomSheet>
 
-              {passwordMessage ? <p className="message">{passwordMessage}</p> : null}
+      <BottomSheet
+        open={isPasswordDialogOpen}
+        title="修改密码"
+        onClose={() => {
+          setIsPasswordDialogOpen(false);
+          resetPasswordModuleState();
+        }}
+      >
+        <form className="bottom-sheet-form form" onSubmit={handleChangePassword} noValidate>
+          <PasswordField
+            autoComplete="current-password"
+            error={passwordErrors.currentPassword}
+            label="当前密码"
+            placeholder="请输入当前密码"
+            value={passwordForm.currentPassword}
+            onChange={(event) => updatePasswordField("currentPassword", event.target.value)}
+          />
+          <PasswordField
+            autoComplete="new-password"
+            error={passwordErrors.newPassword}
+            label="新密码"
+            placeholder="请输入新密码"
+            value={passwordForm.newPassword}
+            onChange={(event) => updatePasswordField("newPassword", event.target.value)}
+          />
+          <PasswordField
+            autoComplete="new-password"
+            error={passwordErrors.confirmPassword}
+            label="确认新密码"
+            placeholder="请再次输入新密码"
+            value={passwordForm.confirmPassword}
+            onChange={(event) => updatePasswordField("confirmPassword", event.target.value)}
+          />
 
-              <div className="action-row">
-                <button className="primary-button" type="submit">
-                  提交修改
-                </button>
-              </div>
-            </form>
-          </section>
-        ) : null}
-      </section>
+          {passwordMessage ? <p className="message banner-message">{passwordMessage}</p> : null}
+
+          <div className="action-row sheet-actions sheet-actions-primary-only">
+            <button className="primary-button primary-button-large" type="submit">
+              提交修改
+            </button>
+          </div>
+        </form>
+      </BottomSheet>
+
+      <ConfirmDeleteModal
+        {...(deleteModalConfig ?? {})}
+        open={Boolean(deleteModalConfig)}
+        title="确认删除"
+      />
     </main>
   );
 }
