@@ -45,12 +45,13 @@ async function createUser(prisma, { username, password, role, isBuiltinAdmin = f
   });
 }
 
-async function createVehicle(prisma, { vehicleCode, plateNumber, brandModel, isDeleted = false }) {
+async function createVehicle(prisma, { vehicleCode, plateNumber, brandModel, status = "available", isDeleted = false }) {
   return prisma.vehicle.create({
     data: {
       vehicleCode,
       plateNumber,
       brandModel,
+      status,
       isDeleted
     }
   });
@@ -284,6 +285,35 @@ describe("Issue 4 registry API", () => {
     );
   });
 
+  it("rejects registry submits when the selected vehicle is idle", async () => {
+    const vehicle = await createVehicle(prisma, {
+      vehicleCode: "CAR-001",
+      plateNumber: "沪A-10001",
+      brandModel: "大众帕萨特",
+      status: "idle"
+    });
+    const agent = await employeeAgent();
+
+    const response = await agent.post("/api/records").send({
+      vehicleId: vehicle.id,
+      businessDate: "2026-07-20",
+      departureTime: "09:00",
+      returnTime: "10:00",
+      reason: "外出办事",
+      route: "园区-政务大厅",
+      startMileage: 1000,
+      endMileage: 1120,
+      driverSignature: "张三",
+      fuelFee: "0",
+      fuelVolume: "0",
+      remark: ""
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ message: "车辆当前不可用，请重新选择" });
+    expect(await prisma.vehicleUseRecord.count()).toBe(0);
+  });
+
   it("lets an administrator submit a cross-day registry record with explicit next-day datetime values", async () => {
     const admin = await prisma.user.findUnique({
       where: {
@@ -323,8 +353,8 @@ describe("Issue 4 registry API", () => {
         isCrossDay: true
       })
     );
-    expect(storedRecord.departureTime).toBe("23:00");
-    expect(storedRecord.returnTime).toBe("01:00");
+    expect(storedRecord.departureTime).toBe("2026-07-20T23:00");
+    expect(storedRecord.returnTime).toBe("2026-07-21T01:00");
     expect(storedRecord.isCrossDay).toBe(true);
   });
 
@@ -362,9 +392,50 @@ describe("Issue 4 registry API", () => {
 
     expect(response.status).toBe(201);
     expect(storedRecord.businessDate).toBe("2026-07-20");
-    expect(storedRecord.departureTime).toBe("23:00");
-    expect(storedRecord.returnTime).toBe("01:00");
+    expect(storedRecord.departureTime).toBe("2026-07-20T23:00");
+    expect(storedRecord.returnTime).toBe("2026-07-21T01:00");
     expect(storedRecord.isCrossDay).toBe(true);
+  });
+
+  it("returns full datetime strings when an admin reads records created from datetime-local inputs", async () => {
+    const employee = await prisma.user.findUnique({
+      where: {
+        username: "employee"
+      }
+    });
+    const vehicle = await createVehicle(prisma, {
+      vehicleCode: "CAR-020",
+      plateNumber: "沪A-10200",
+      brandModel: "本田雅阁"
+    });
+    const employeeSubmitter = await employeeAgent();
+
+    await employeeSubmitter.post("/api/records").send({
+      vehicleId: vehicle.id,
+      businessDate: "2026-07-01",
+      departureTime: "2026-07-20T08:30",
+      returnTime: "2026-07-20T10:45",
+      reason: "行政外勤",
+      route: "园区-政务中心",
+      startMileage: 2000,
+      endMileage: 2060,
+      driverSignature: "张三"
+    }).expect(201);
+
+    const adminReader = await adminAgent();
+    const response = await adminReader.get("/api/records");
+
+    expect(response.status).toBe(200);
+    expect(response.body.records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          vehicleId: vehicle.id,
+          businessDate: "2026-07-20",
+          departureTime: "2026-07-20T08:30",
+          returnTime: "2026-07-20T10:45"
+        })
+      ])
+    );
   });
 
   it("rejects records when the end mileage is smaller than the start mileage", async () => {
@@ -1000,6 +1071,18 @@ describe("Issue 4 registry API", () => {
       "REC-B",
       "REC-C"
     ]);
+    expect(rows.slice(1).map((row) => row[1])).toEqual([
+      "2026-07-19 08:00",
+      "2026-07-20 09:00",
+      "2026-07-20 13:00",
+      "2026-07-20 15:00"
+    ]);
+    expect(rows.slice(1).map((row) => row[2])).toEqual([
+      "2026-07-19 09:00",
+      "2026-07-20 10:00",
+      "2026-07-20 14:00",
+      "2026-07-20 16:00"
+    ]);
     expect(rows.flat().includes("REC-DELETE")).toBe(false);
   });
 
@@ -1059,7 +1142,46 @@ describe("Issue 4 registry API", () => {
     expect(response.status).toBe(200);
     expect(rows).toHaveLength(2);
     expect(rows[1][0]).toBe("2026-07-21");
+    expect(rows[1][1]).toBe("2026-07-21 09:00");
+    expect(rows[1][2]).toBe("2026-07-21 10:00");
     expect(rows[1][3]).toBe("EXPORT-MATCH");
+  });
+
+  it("exports full datetime values for records created from datetime-local inputs", async () => {
+    const vehicle = await createVehicle(prisma, {
+      vehicleCode: "CAR-030",
+      plateNumber: "沪A-10300",
+      brandModel: "奥迪A4"
+    });
+    const employeeSubmitter = await employeeAgent();
+
+    await employeeSubmitter.post("/api/records").send({
+      vehicleId: vehicle.id,
+      businessDate: "2026-07-01",
+      departureTime: "2026-07-22T08:15",
+      returnTime: "2026-07-22T11:20",
+      reason: "导出校验",
+      route: "园区-办事大厅",
+      startMileage: 3200,
+      endMileage: 3290,
+      driverSignature: "张三"
+    }).expect(201);
+
+    const agent = await adminAgent();
+    const response = await getBinaryResponse(agent, "/api/records/export");
+    const workbook = XLSX.read(response.body, { type: "buffer" });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+    expect(response.status).toBe(200);
+    expect(rows).toContainEqual(
+      expect.arrayContaining([
+        "2026-07-22",
+        "2026-07-22 08:15",
+        "2026-07-22 11:20",
+        "导出校验"
+      ])
+    );
   });
 
   it("rejects export for employees", async () => {

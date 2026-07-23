@@ -36,6 +36,7 @@ function toPublicVehicle(vehicle) {
     vehicleCode: vehicle.vehicleCode,
     plateNumber: vehicle.plateNumber,
     brandModel: vehicle.brandModel,
+    status: vehicle.status,
     isDeleted: vehicle.isDeleted
   };
 }
@@ -86,20 +87,23 @@ function readDateTimeParts(value) {
   if (!text) {
     return {
       date: "",
-      time: ""
+      time: "",
+      datetime: ""
     };
   }
 
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(text)) {
     return {
       date: text.slice(0, 10),
-      time: text.slice(11, 16)
+      time: text.slice(11, 16),
+      datetime: text
     };
   }
 
   return {
     date: "",
-    time: text
+    time: text,
+    datetime: text
   };
 }
 
@@ -133,6 +137,46 @@ function formatFuelExportValue(fuelFee, fuelVolume) {
   }
 
   return `${feeText ? `${feeText}元` : "-"}/${volumeText ? `${volumeText}L` : "-"}`;
+}
+
+function isFullDateTimeText(value) {
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(String(value ?? "").trim());
+}
+
+function addDaysToDateText(dateText, days) {
+  const [year, month, day] = String(dateText ?? "")
+    .split("-")
+    .map((value) => Number(value));
+
+  if (!year || !month || !day) {
+    return String(dateText ?? "").trim();
+  }
+
+  const nextDate = new Date(Date.UTC(year, month - 1, day + days));
+  const nextYear = nextDate.getUTCFullYear();
+  const nextMonth = String(nextDate.getUTCMonth() + 1).padStart(2, "0");
+  const nextDay = String(nextDate.getUTCDate()).padStart(2, "0");
+
+  return `${nextYear}-${nextMonth}-${nextDay}`;
+}
+
+function formatManagedRecordDateTime(record, value, { isReturn = false } = {}) {
+  const text = String(value ?? "").trim();
+
+  if (!text) {
+    return "";
+  }
+
+  if (isFullDateTimeText(text)) {
+    return text.replace("T", " ");
+  }
+
+  if (!record.businessDate) {
+    return text;
+  }
+
+  const dateText = isReturn && record.isCrossDay ? addDaysToDateText(record.businessDate, 1) : record.businessDate;
+  return `${dateText} ${text}`;
 }
 
 function formatExportFileName(date = new Date()) {
@@ -193,6 +237,17 @@ function isValidNonNegativeDecimal(value) {
   }
 
   return Number(text) >= 0;
+}
+
+const vehicleStatusValues = ["available", "idle"];
+
+function readVehicleStatus(value, fallback = "available") {
+  const status = String(value ?? "").trim();
+  return status || fallback;
+}
+
+function isValidVehicleStatus(status) {
+  return vehicleStatusValues.includes(status);
 }
 
 function readRecordFilters(request) {
@@ -590,10 +645,11 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
   app.get(
     "/api/vehicles",
     requireLogin,
-    asyncHandler(async (_request, response) => {
+    asyncHandler(async (request, response) => {
       const vehicles = await prisma.vehicle.findMany({
         where: {
-          isDeleted: false
+          isDeleted: false,
+          ...(request.auth.user.role === "admin" ? {} : { status: "available" })
         },
         orderBy: {
           vehicleCode: "asc"
@@ -641,9 +697,14 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
       const vehicleCode = String(request.body.vehicleCode ?? "").trim();
       const plateNumber = String(request.body.plateNumber ?? "").trim();
       const brandModel = String(request.body.brandModel ?? "").trim();
+      const status = readVehicleStatus(request.body.status);
 
       if (!vehicleCode || !plateNumber || !brandModel) {
         return response.status(400).json({ message: "车辆编号、车牌号、品牌型号必填" });
+      }
+
+      if (!isValidVehicleStatus(status)) {
+        return response.status(400).json({ message: "车辆状态不合法" });
       }
 
       const duplicateCode = await prisma.vehicle.findUnique({
@@ -668,11 +729,46 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
         data: {
           vehicleCode,
           plateNumber,
-          brandModel
+          brandModel,
+          status
         }
       });
 
       return response.status(201).json({ vehicle: toPublicVehicle(vehicle) });
+    })
+  );
+
+  app.patch(
+    "/api/vehicles/:id/status",
+    requireLogin,
+    requireAdmin,
+    asyncHandler(async (request, response) => {
+      const status = readVehicleStatus(request.body.status, "");
+
+      if (!isValidVehicleStatus(status)) {
+        return response.status(400).json({ message: "车辆状态不合法" });
+      }
+
+      const vehicle = await prisma.vehicle.findUnique({
+        where: {
+          id: request.params.id
+        }
+      });
+
+      if (!vehicle || vehicle.isDeleted) {
+        return response.status(404).json({ message: "车辆不存在" });
+      }
+
+      const updatedVehicle = await prisma.vehicle.update({
+        where: {
+          id: vehicle.id
+        },
+        data: {
+          status
+        }
+      });
+
+      return response.json({ vehicle: toPublicVehicle(updatedVehicle) });
     })
   );
 
@@ -729,8 +825,8 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
         recordExportHeaders,
         ...records.map((record) => [
           record.businessDate,
-          record.departureTime,
-          record.returnTime,
+          formatManagedRecordDateTime(record, record.departureTime),
+          formatManagedRecordDateTime(record, record.returnTime, { isReturn: true }),
           record.reason,
           record.route,
           record.startMileage,
@@ -774,8 +870,8 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
       const departureDateTime = readDateTimeParts(request.body.departureTime);
       const returnDateTime = readDateTimeParts(request.body.returnTime);
       const businessDate = departureDateTime.date || requestedBusinessDate;
-      const departureTime = departureDateTime.time;
-      const returnTime = returnDateTime.time;
+      const departureTime = departureDateTime.datetime || departureDateTime.time;
+      const returnTime = returnDateTime.datetime || returnDateTime.time;
       const reason = readRequiredText(request.body.reason);
       const route = readRequiredText(request.body.route);
       const driverSignature = readRequiredText(request.body.driverSignature);
@@ -825,6 +921,10 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
         return response.status(400).json({ message: "车辆不存在或已失效" });
       }
 
+      if (vehicle.status !== "available") {
+        return response.status(400).json({ message: "车辆当前不可用，请重新选择" });
+      }
+
       const record = await prisma.vehicleUseRecord.create({
         data: {
           vehicleId: vehicle.id,
@@ -840,7 +940,7 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
           isCrossDay:
             returnDateTime.date && businessDate
               ? returnDateTime.date !== businessDate
-              : returnTime < departureTime,
+              : isReturnEarlierThanDeparture(departureTime, returnTime),
           fuelFee,
           fuelVolume,
           driverSignature,

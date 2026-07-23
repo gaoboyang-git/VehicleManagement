@@ -173,10 +173,34 @@ function mockUserManagementFetch(
         vehicleCode: body.vehicleCode,
         plateNumber: body.plateNumber,
         brandModel: body.brandModel,
+        status: body.status ?? "available",
         isDeleted: false
       };
       vehicles = [...vehicles, createdVehicle];
       return okJson({ vehicle: createdVehicle });
+    }
+
+    if (pathname.startsWith("/api/vehicles/") && pathname.endsWith("/status") && method === "PATCH") {
+      const id = pathname.split("/").at(-2);
+      const body = JSON.parse(options.body);
+      const status = body.status;
+      const target = vehicles.find((vehicle) => vehicle.id === id);
+
+      if (!target) {
+        return failJson(404, { message: "车辆不存在或已失效" });
+      }
+
+      if (!["available", "idle"].includes(status)) {
+        return failJson(400, { message: "车辆状态非法" });
+      }
+
+      vehicles = vehicles.map((vehicle) =>
+        vehicle.id === id ? { ...vehicle, status } : vehicle
+      );
+
+      return okJson({
+        vehicle: vehicles.find((vehicle) => vehicle.id === id)
+      });
     }
 
     if (pathname.startsWith("/api/vehicles/") && method === "DELETE") {
@@ -213,7 +237,9 @@ function mockRegistryFetch({
 
     if (pathname === "/api/vehicles" && method === "GET") {
       return okJson({
-        vehicles: vehicles.filter((vehicle) => !vehicle.isDeleted)
+        vehicles: vehicles.filter(
+          (vehicle) => !vehicle.isDeleted && (vehicle.status ?? "available") === "available"
+        )
       });
     }
 
@@ -247,11 +273,16 @@ function mockRegistryFetch({
         return failJson(400, { message: "车辆不存在或已失效" });
       }
 
+      if ((vehicle.status ?? "available") !== "available") {
+        return failJson(400, { message: "车辆当前不可用，请重新选择" });
+      }
+
       const startMileage = Number(body.startMileage);
       const endMileage = Number(body.endMileage);
       const distance = endMileage - startMileage;
-      const departureTime = extractTimePart(body.departureTime);
-      const returnTime = extractTimePart(body.returnTime);
+      const businessDate = extractDatePart(body.departureTime) || body.businessDate;
+      const departureTime = body.departureTime;
+      const returnTime = body.returnTime;
 
       if (Number.isNaN(startMileage) || Number.isNaN(endMileage) || startMileage < 0 || endMileage < 0) {
         return failJson(400, { message: "起步公里和终点公里必须为非负数字" });
@@ -267,6 +298,7 @@ function mockRegistryFetch({
       };
       records.push({
         ...body,
+        businessDate,
         departureTime,
         returnTime,
         distance
@@ -434,6 +466,20 @@ describe("Issue 1 authentication UI", () => {
 
     await user.click(screen.getByRole("button", { name: "隐藏密码" }));
     expect(passwordInput).toHaveAttribute("type", "password");
+  });
+
+  it("renders login failures with the error banner style", async () => {
+    mockFetch(() => failJson(401, { message: "账号或密码错误" }));
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.type(screen.getByLabelText("账号"), "admin");
+    await user.type(screen.getByLabelText("密码"), "wrong-password");
+    await user.click(screen.getByRole("button", { name: "登录" }));
+
+    const banner = await screen.findByText("账号或密码错误");
+    expect(banner).toHaveClass("banner-message", "banner-message-error");
   });
 
   it("shows the management entry after an administrator logs in", async () => {
@@ -811,7 +857,7 @@ describe("Issue 3 vehicle management UI", () => {
 
     expect(await screen.findByText("沪A-10001")).toBeInTheDocument();
     expect(screen.getByText("大众帕萨特")).toBeInTheDocument();
-    expect(screen.getByText("在用")).toBeInTheDocument();
+    expect(screen.getByText("可用")).toBeInTheDocument();
   });
 
   it("shows duplicate vehicle code and plate number errors without changing the visible list", async () => {
@@ -862,7 +908,7 @@ describe("Issue 3 vehicle management UI", () => {
     await loginAsAdminAndOpenManagement(user);
     await user.click(await screen.findByRole("button", { name: "删除车辆 CAR-CANCEL" }));
 
-    expect(screen.getByText("确认删除车辆「CAR-CANCEL」？此操作不可撤销。")).toBeInTheDocument();
+    expect(screen.getByText("确认删除车辆「沪A-CANCEL-别克GL8」？此操作不可撤销。")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "取消" }));
     expect(screen.getByText("沪A-CANCEL")).toBeInTheDocument();
@@ -871,6 +917,38 @@ describe("Issue 3 vehicle management UI", () => {
     await user.click(screen.getByRole("button", { name: "确认删除" }));
 
     expect(screen.queryByText("沪A-CANCEL")).not.toBeInTheDocument();
+  });
+
+  it("lets an administrator switch a vehicle between available and idle", async () => {
+    mockUserManagementFetch(
+      [{ id: "admin-id", username: "admin", role: "admin", isBuiltinAdmin: true }],
+      [
+        {
+          id: "vehicle-id",
+          vehicleCode: "CAR-001",
+          plateNumber: "沪A-10001",
+          brandModel: "大众帕萨特",
+          status: "available",
+          isDeleted: false
+        }
+      ]
+    );
+    const user = userEvent.setup();
+
+    render(<App />);
+    await loginAsAdminAndOpenManagement(user);
+
+    expect(await screen.findByText("可用")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "设为闲置 CAR-001" }));
+    expect(screen.getByText("确认将车辆「CAR-001」设为闲置？")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "确认操作" }));
+
+    expect(await screen.findByText("闲置")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "设为可用 CAR-001" }));
+    expect(screen.getByText("确认将车辆「CAR-001」设为可用？")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "确认操作" }));
+
+    expect(await screen.findByText("可用")).toBeInTheDocument();
   });
 });
 
@@ -894,6 +972,7 @@ describe("Issue 4 registry UI", () => {
           vehicleCode: "CAR-001",
           plateNumber: "沪A-10001",
           brandModel: "大众帕萨特",
+          status: "available",
           isDeleted: false
         }
       ]
@@ -926,6 +1005,13 @@ describe("Issue 4 registry UI", () => {
     expect(screen.getByLabelText("终点公里读数")).toHaveValue(null);
     expect(screen.getByLabelText("出车时间")).toHaveValue("");
     expect(getRecords()).toHaveLength(1);
+    expect(getRecords()[0]).toEqual(
+      expect.objectContaining({
+        businessDate: "2026-07-20",
+        departureTime: "2026-07-20T09:00",
+        returnTime: "2026-07-20T10:00"
+      })
+    );
   });
 
   it("reloads independent mileage when switching vehicles and clears filled values", async () => {
@@ -936,6 +1022,7 @@ describe("Issue 4 registry UI", () => {
           vehicleCode: "CAR-001",
           plateNumber: "沪A-10001",
           brandModel: "大众帕萨特",
+          status: "available",
           isDeleted: false
         },
         {
@@ -943,6 +1030,7 @@ describe("Issue 4 registry UI", () => {
           vehicleCode: "CAR-002",
           plateNumber: "沪A-10002",
           brandModel: "别克GL8",
+          status: "available",
           isDeleted: false
         }
       ],
@@ -980,6 +1068,7 @@ describe("Issue 4 registry UI", () => {
           vehicleCode: "CAR-001",
           plateNumber: "沪A-10001",
           brandModel: "大众帕萨特",
+          status: "available",
           isDeleted: false
         }
       ],
@@ -1026,6 +1115,7 @@ describe("Issue 4 registry UI", () => {
           vehicleCode: "CAR-001",
           plateNumber: "沪A-10001",
           brandModel: "大众帕萨特",
+          status: "available",
           isDeleted: false
         }
       ],
@@ -1059,6 +1149,7 @@ describe("Issue 4 registry UI", () => {
           vehicleCode: "CAR-001",
           plateNumber: "沪A-10001",
           brandModel: "大众帕萨特",
+          status: "available",
           isDeleted: false
         }
       ],
@@ -1099,6 +1190,7 @@ describe("Issue 4 registry UI", () => {
           vehicleCode: "CAR-001",
           plateNumber: "沪A-10001",
           brandModel: "大众帕萨特",
+          status: "available",
           isDeleted: false
         }
       ],
@@ -1136,6 +1228,7 @@ describe("Issue 4 registry UI", () => {
           vehicleCode: "CAR-001",
           plateNumber: "沪A-10001",
           brandModel: "大众帕萨特",
+          status: "available",
           isDeleted: false
         }
       ],
@@ -1160,6 +1253,38 @@ describe("Issue 4 registry UI", () => {
 
     expect(fuelFeeInput).toHaveValue(15.5);
     expect(fuelVolumeInput).toHaveValue(20.3);
+  });
+
+  it("shows only available vehicles in the employee registry selector", async () => {
+    mockRegistryFetch({
+      vehicles: [
+        {
+          id: "vehicle-a",
+          vehicleCode: "CAR-001",
+          plateNumber: "沪A-10001",
+          brandModel: "大众帕萨特",
+          status: "available",
+          isDeleted: false
+        },
+        {
+          id: "vehicle-b",
+          vehicleCode: "CAR-002",
+          plateNumber: "沪A-10002",
+          brandModel: "别克GL8",
+          status: "idle",
+          isDeleted: false
+        }
+      ]
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+    await loginAsEmployee(user);
+
+    const vehicleSelect = await screen.findByLabelText("车辆");
+
+    expect(within(vehicleSelect).getByRole("option", { name: "CAR-001 + 沪A-10001" })).toBeInTheDocument();
+    expect(within(vehicleSelect).queryByRole("option", { name: "CAR-002 + 沪A-10002" })).not.toBeInTheDocument();
   });
 });
 
@@ -1200,8 +1325,8 @@ describe("Issue 5 record management UI", () => {
           plateNumber: "沪A-10001",
           registrantUsername: "admin",
           businessDate: "2026-07-20",
-          departureTime: "09:00",
-          returnTime: "10:00",
+          departureTime: "2026-07-20T09:00",
+          returnTime: "2026-07-20T10:00",
           startMileage: 1000,
           endMileage: 1100,
           distance: 100,
@@ -1233,8 +1358,49 @@ describe("Issue 5 record management UI", () => {
     await user.click(within(recordSection).getByRole("button", { name: "查看记录 REC-001" }));
 
     expect(within(recordSection).getByText("加油：0元/0L")).toBeInTheDocument();
+    expect(within(recordSection).getByText("2026-07-20 09:00-2026-07-20 10:00 · 100 公里")).toBeInTheDocument();
     expect(within(recordSection).getByRole("button", { name: "删除记录 REC-001" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /编辑/ })).not.toBeInTheDocument();
+  });
+
+  it("formats legacy time-only records with full business dates in the expanded detail", async () => {
+    mockAdminRecordManagementFetch({
+      users: [{ id: "admin-id", username: "admin", role: "admin", isBuiltinAdmin: true }],
+      records: [
+        {
+          id: "record-legacy",
+          vehicleId: "vehicle-1",
+          vehicleCode: "CAR-001",
+          plateNumber: "沪A-10001",
+          registrantUsername: "admin",
+          businessDate: "2026-07-20",
+          departureTime: "23:00",
+          returnTime: "01:00",
+          startMileage: 1000,
+          endMileage: 1100,
+          distance: 100,
+          fuelFee: "0",
+          fuelVolume: "0",
+          driverSignature: "张三",
+          remark: "",
+          reason: "LEGACY",
+          route: "园区-值班点",
+          isCrossDay: true,
+          createdAt: "2026-07-20T23:30:00.000Z"
+        }
+      ]
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+    await loginAsAdminAndOpenRecords(user);
+
+    const recordSection = await screen.findByRole("region", { name: "用车记录管理" });
+    await user.click(within(recordSection).getByRole("button", { name: "查看记录 LEGACY" }));
+
+    expect(
+      within(recordSection).getByText("2026-07-20 23:00-2026-07-21 01:00 · 100 公里 · 跨天")
+    ).toBeInTheDocument();
   });
 
   it("shows records in reverse created order and supports searching and filtering", async () => {
@@ -1523,6 +1689,7 @@ describe("Issue 5 record management UI", () => {
 
     await user.click(within(recordSection).getByRole("button", { name: "全选当前筛选结果" }));
     expect(within(recordSection).getByText("已选 2 条")).toBeInTheDocument();
+    expect(recordSection.querySelector(".checkbox-shell")).toHaveClass("checkbox-shell-active");
 
     await user.click(within(recordSection).getByRole("button", { name: "批量删除" }));
     expect(screen.getByText("确认删除已选 2 条记录？此操作不可撤销。")).toBeInTheDocument();
@@ -1593,7 +1760,8 @@ describe("Issue 5 record management UI", () => {
     });
     await user.click(await screen.findByRole("button", { name: "导出 Excel" }));
 
-    expect(await screen.findByText("Excel 已导出")).toBeInTheDocument();
+    const exportBanner = await screen.findByText("Excel 已导出");
+    expect(exportBanner).toHaveClass("banner-message", "banner-message-success");
     expect(
       fetchMock.mock.calls.some(
         ([url]) =>

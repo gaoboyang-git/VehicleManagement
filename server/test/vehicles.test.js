@@ -34,12 +34,13 @@ async function createUser(prisma, { username, password, role, isBuiltinAdmin = f
   });
 }
 
-async function createVehicle(prisma, { vehicleCode, plateNumber, brandModel, isDeleted = false }) {
+async function createVehicle(prisma, { vehicleCode, plateNumber, brandModel, status = "available", isDeleted = false }) {
   return prisma.vehicle.create({
     data: {
       vehicleCode,
       plateNumber,
       brandModel,
+      status,
       isDeleted
     }
   });
@@ -116,6 +117,7 @@ describe("Issue 3 vehicle management API", () => {
 
     expect(response.status).toBe(200);
     expect(response.body.vehicles.map((vehicle) => vehicle.vehicleCode)).toEqual(["CAR-000", "CAR-001"]);
+    expect(response.body.vehicles.map((vehicle) => vehicle.status)).toEqual(["available", "available"]);
   });
 
   it("allows an employee to read active vehicles for the registry dropdown but rejects vehicle management writes", async () => {
@@ -130,7 +132,7 @@ describe("Issue 3 vehicle management API", () => {
     }).expect(403);
   });
 
-  it("creates a vehicle and rejects duplicate vehicle code or plate number", async () => {
+  it("creates a vehicle with a default status and rejects duplicate vehicle code or plate number", async () => {
     const agent = await adminAgent();
 
     const created = await agent.post("/api/vehicles").send({
@@ -154,6 +156,7 @@ describe("Issue 3 vehicle management API", () => {
       vehicleCode: "CAR-002",
       plateNumber: "沪A-10002",
       brandModel: "丰田凯美瑞",
+      status: "available",
       isDeleted: false
     }));
     expect(duplicateCode.status).toBe(409);
@@ -180,6 +183,44 @@ describe("Issue 3 vehicle management API", () => {
       plateNumber: "沪A-10002",
       brandModel: ""
     }).expect(400);
+  });
+
+  it("creates a vehicle with an explicit idle status and lets admins change status", async () => {
+    const agent = await adminAgent();
+
+    const created = await agent.post("/api/vehicles").send({
+      vehicleCode: "CAR-002",
+      plateNumber: "沪A-10002",
+      brandModel: "丰田凯美瑞",
+      status: "idle"
+    });
+
+    expect(created.status).toBe(201);
+    expect(created.body.vehicle.status).toBe("idle");
+
+    const switched = await agent.patch(`/api/vehicles/${created.body.vehicle.id}/status`).send({
+      status: "available"
+    });
+
+    expect(switched.status).toBe(200);
+    expect(switched.body.vehicle).toEqual(expect.objectContaining({
+      id: created.body.vehicle.id,
+      status: "available"
+    }));
+  });
+
+  it("rejects invalid vehicle status changes and blocks employees from updating status", async () => {
+    const admin = await adminAgent();
+    const employee = request.agent(app);
+    await employee.post("/api/login").send({ username: "employee", password: "Employee001" }).expect(200);
+    const vehicle = await prisma.vehicle.findUnique({
+      where: {
+        vehicleCode: "CAR-001"
+      }
+    });
+
+    await admin.patch(`/api/vehicles/${vehicle.id}/status`).send({ status: "busy" }).expect(400);
+    await employee.patch(`/api/vehicles/${vehicle.id}/status`).send({ status: "idle" }).expect(403);
   });
 
   it("soft deletes a vehicle so it disappears from active vehicle lists", async () => {

@@ -3084,6 +3084,14 @@ body,
   justify-content: flex-end;
 }
 
+.vehicle-status-action {
+  min-height: 32px;
+  padding: 0 13px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .vehicle-card .ghost-button-danger {
   min-height: 32px;
   border: 1px solid rgba(200, 16, 46, 0.42);
@@ -3239,4 +3247,214 @@ body,
   width: 18px;
   height: 18px;
   object-fit: contain;
+}
+
+/* Web adaptation and interaction polish */
+button,
+.module-nav-card,
+.selection-toggle,
+.record-summary-button {
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+button:focus:not(:focus-visible),
+.module-nav-card:focus:not(:focus-visible),
+.selection-toggle:focus:not(:focus-visible),
+.record-summary-button:focus:not(:focus-visible) {
+  outline: none;
+}
+
+button:focus-visible,
+.module-nav-card:focus-visible,
+.selection-toggle:focus-visible,
+.record-summary-button:focus-visible {
+  outline: 2px solid rgba(36, 64, 148, 0.34);
+  outline-offset: 2px;
+}
+
+button:active,
+.module-nav-card:active,
+.selection-toggle:active,
+.record-summary-button:active {
+  transform: none;
+}
+
+.message {
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.banner-message {
+  border-radius: 14px;
+  padding: 10px 14px;
+}
+
+.banner-message-error {
+  border: 1px solid rgba(224, 63, 96, 0.18);
+  background: rgba(255, 241, 244, 0.9);
+  color: #c4173d;
+}
+
+.banner-message-success,
+.banner-message-info {
+  border: 1px solid rgba(27, 53, 133, 0.12);
+  background: rgba(237, 244, 255, 0.96);
+  color: #27499d;
+}
+
+.checkbox-shell {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.checkbox-shell::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 28%;
+  height: 46%;
+  border-right: 2px solid transparent;
+  border-bottom: 2px solid transparent;
+  transform: translate(-50%, -58%) rotate(45deg);
+}
+
+.checkbox-shell-active {
+  background: #2f59d9;
+  border-color: #2f59d9;
+  box-shadow: 0 4px 12px rgba(47, 89, 217, 0.22);
+}
+
+.checkbox-shell-active::after {
+  border-color: #ffffff;
+}
+
+@media (min-width: 721px) {
+  .shell,
+  .shell-login {
+    padding: 0 32px 56px;
+  }
+
+  .auth-layout {
+    width: min(100%, 1200px);
+    min-height: 100vh;
+  }
+
+  .app-shell,
+  .module-shell {
+    width: min(100%, 1180px);
+    min-height: 100vh;
+  }
+
+  .auth-hero {
+    min-height: 280px;
+    padding: 40px 40px 108px;
+  }
+
+  .page-hero {
+    border-radius: 0 0 34px 34px;
+  }
+
+  .auth-surface {
+    display: grid;
+    justify-items: center;
+    gap: 18px;
+    margin-top: -44px;
+    border-radius: 34px 34px 0 0;
+    padding: 64px 40px 48px;
+  }
+
+  .auth-surface::before {
+    height: 64px;
+    border-radius: 34px 34px 0 0;
+  }
+
+  .auth-card,
+  .auth-card + .notice-card {
+    width: min(100%, 420px);
+  }
+
+  .employee-hero {
+    min-height: 188px;
+    padding: 28px 32px 58px;
+  }
+
+  .employee-hero + .page-surface {
+    grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+    align-items: start;
+    gap: 24px;
+    margin-top: -30px;
+    padding: 28px 32px 48px;
+  }
+
+  .employee-hero + .page-surface .identity-card {
+    position: sticky;
+    top: 24px;
+  }
+
+  .employee-hero + .page-surface .registry-form {
+    padding: 24px;
+  }
+
+  .employee-hero + .page-surface .registry-form .field-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px 16px;
+  }
+
+  .employee-hero + .page-surface .registry-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .admin-hero + .page-surface {
+    padding: 28px 32px 40px;
+  }
+
+  .nav-card-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .module-topbar {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    padding: 24px 32px 0;
+  }
+
+  .module-surface {
+    padding: 24px 32px 48px;
+  }
+
+  .module-topbar-action {
+    width: auto;
+    min-width: 156px;
+  }
+
+  .filter-grid-records {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px 14px;
+  }
+
+  .filter-grid-records > .field:first-child {
+    grid-column: span 2;
+  }
+
+  .selection-toolbar {
+    flex-wrap: nowrap;
+  }
+
+  .bottom-sheet {
+    width: min(100%, 640px);
+    max-width: 640px;
+  }
+
+  .bottom-sheet-overlay {
+    align-items: end;
+    justify-items: center;
+    place-items: end center;
+  }
 }

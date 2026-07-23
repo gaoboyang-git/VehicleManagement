@@ -127,6 +127,46 @@ function extractTimePart(value) {
   return text.includes("T") ? text.slice(11, 16) : text;
 }
 
+function isFullDateTimeText(value) {
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(String(value ?? "").trim());
+}
+
+function addDaysToDateText(dateText, days) {
+  const [year, month, day] = String(dateText ?? "")
+    .split("-")
+    .map((value) => Number(value));
+
+  if (!year || !month || !day) {
+    return String(dateText ?? "").trim();
+  }
+
+  const nextDate = new Date(Date.UTC(year, month - 1, day + days));
+  const nextYear = nextDate.getUTCFullYear();
+  const nextMonth = String(nextDate.getUTCMonth() + 1).padStart(2, "0");
+  const nextDay = String(nextDate.getUTCDate()).padStart(2, "0");
+
+  return `${nextYear}-${nextMonth}-${nextDay}`;
+}
+
+function formatManagedRecordDateTime(record, value, { isReturn = false } = {}) {
+  const text = String(value ?? "").trim();
+
+  if (!text) {
+    return "";
+  }
+
+  if (isFullDateTimeText(text)) {
+    return text.replace("T", " ");
+  }
+
+  if (!record?.businessDate) {
+    return text;
+  }
+
+  const dateText = isReturn && record.isCrossDay ? addDaysToDateText(record.businessDate, 1) : record.businessDate;
+  return `${dateText} ${text}`;
+}
+
 function isReturnEarlierThanDeparture(departureValue, returnValue) {
   const departureText = String(departureValue ?? "").trim();
   const returnText = String(returnValue ?? "").trim();
@@ -190,15 +230,21 @@ function formatFuelDisplay(fuelFee, fuelVolume) {
 }
 
 function getVehicleUsageStatus(vehicle) {
-  if (vehicle?.isInUse === true || vehicle?.status === "inUse" || vehicle?.status === "在用") {
-    return "在用";
+  if (
+    vehicle?.status === "available" ||
+    vehicle?.status === "可用" ||
+    vehicle?.isInUse === true ||
+    vehicle?.status === "inUse" ||
+    vehicle?.status === "在用"
+  ) {
+    return "可用";
   }
 
   if (vehicle?.isInUse === false || vehicle?.status === "idle" || vehicle?.status === "闲置") {
     return "闲置";
   }
 
-  return "在用";
+  return "可用";
 }
 
 function buildRecordQueryString(filters) {
@@ -215,6 +261,34 @@ function formatExportFileName(date = new Date()) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `用车记录-${year}年${month}月${day}日.xlsx`;
+}
+
+function createBannerMessage(text, tone = "error") {
+  const normalizedText = String(text ?? "").trim();
+
+  if (!normalizedText) {
+    return null;
+  }
+
+  return {
+    text: normalizedText,
+    tone
+  };
+}
+
+function BannerMessage({ message, defaultTone = "error" }) {
+  if (!message) {
+    return null;
+  }
+
+  const text = typeof message === "string" ? message : message.text;
+  const tone = typeof message === "string" ? defaultTone : message.tone ?? defaultTone;
+
+  if (!text) {
+    return null;
+  }
+
+  return <p className={`message banner-message banner-message-${tone}`}>{text}</p>;
 }
 
 function AppIcon({ name, className = "" }) {
@@ -631,7 +705,15 @@ function BottomSheet({ open, title, ariaLabel, onClose, children }) {
   );
 }
 
-function ConfirmDeleteModal({ open, title, body, ariaLabel, onCancel, onConfirm }) {
+function ConfirmDeleteModal({
+  open,
+  title,
+  body,
+  ariaLabel,
+  confirmLabel = "确认删除",
+  onCancel,
+  onConfirm
+}) {
   if (!open) {
     return null;
   }
@@ -649,7 +731,7 @@ function ConfirmDeleteModal({ open, title, body, ariaLabel, onCancel, onConfirm 
             取消
           </button>
           <button className="danger-button" type="button" onClick={onConfirm}>
-            确认删除
+            {confirmLabel}
           </button>
         </div>
     </BottomSheet>
@@ -667,14 +749,14 @@ export function App() {
   const [user, setUser] = useState(null);
   const [loginForm, setLoginForm] = useState({ username: "", password: "" });
   const [loginErrors, setLoginErrors] = useState({});
-  const [loginMessage, setLoginMessage] = useState("");
+  const [loginMessage, setLoginMessage] = useState(null);
   const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false);
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: "",
     newPassword: "",
     confirmPassword: ""
   });
-  const [passwordMessage, setPasswordMessage] = useState("");
+  const [passwordMessage, setPasswordMessage] = useState(null);
   const [passwordErrors, setPasswordErrors] = useState({});
   const [view, setView] = useState(employeeRegistryView);
   const [managedUsers, setManagedUsers] = useState([]);
@@ -682,9 +764,9 @@ export function App() {
   const [vehicles, setVehicles] = useState([]);
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
   const [registryForm, setRegistryForm] = useState(() => createEmptyRegistryForm());
-  const [registryMessage, setRegistryMessage] = useState("");
+  const [registryMessage, setRegistryMessage] = useState(null);
   const [registryErrors, setRegistryErrors] = useState({});
-  const [userManagementMessage, setUserManagementMessage] = useState("");
+  const [userManagementMessage, setUserManagementMessage] = useState(null);
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
   const [newUserErrors, setNewUserErrors] = useState({});
   const [newUserForm, setNewUserForm] = useState({
@@ -704,9 +786,11 @@ export function App() {
   const [vehicleForm, setVehicleForm] = useState({
     vehicleCode: "",
     plateNumber: "",
-    brandModel: ""
+    brandModel: "",
+    status: "available"
   });
   const [pendingDeleteVehicle, setPendingDeleteVehicle] = useState(null);
+  const [pendingVehicleStatusChange, setPendingVehicleStatusChange] = useState(null);
   const [pendingDeleteRecord, setPendingDeleteRecord] = useState(null);
   const [selectedRecordIds, setSelectedRecordIds] = useState([]);
   const [expandedRecordId, setExpandedRecordId] = useState("");
@@ -727,7 +811,7 @@ export function App() {
     let isCurrent = true;
 
     async function loadLatestMileage() {
-      setRegistryMessage("");
+      setRegistryMessage(null);
       setRegistryForm(createEmptyRegistryForm());
 
       const response = await fetch(`/api/vehicles/${selectedVehicleId}/latest-mileage`, {
@@ -739,7 +823,7 @@ export function App() {
       }
 
       if (!response.ok) {
-        setRegistryMessage(await readApiMessage(response));
+        setRegistryMessage(createBannerMessage(await readApiMessage(response)));
         setRegistryForm(createEmptyRegistryForm());
         return;
       }
@@ -765,6 +849,7 @@ export function App() {
   function updateLoginField(field, value) {
     setLoginForm((current) => ({ ...current, [field]: value }));
     setLoginErrors((current) => ({ ...current, [field]: "" }));
+    setLoginMessage(null);
   }
 
   function closeInlinePanels() {
@@ -774,6 +859,7 @@ export function App() {
     setResetUser(null);
     setIsAddVehicleOpen(false);
     setPendingDeleteVehicle(null);
+    setPendingVehicleStatusChange(null);
     setPendingDeleteRecord(null);
     setExpandedRecordId("");
     setIsBulkDeleteOpen(false);
@@ -782,37 +868,37 @@ export function App() {
   function resetPasswordModuleState() {
     setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
     setPasswordErrors({});
-    setPasswordMessage("");
+    setPasswordMessage(null);
   }
 
   function resetAdminModuleState() {
     closeInlinePanels();
-    setUserManagementMessage("");
+    setUserManagementMessage(null);
     resetPasswordModuleState();
   }
 
   function updatePasswordField(field, value) {
     setPasswordForm((current) => ({ ...current, [field]: value }));
     setPasswordErrors((current) => ({ ...current, [field]: "" }));
-    setPasswordMessage("");
+    setPasswordMessage(null);
   }
 
   function updateNewUserField(field, value) {
     setNewUserForm((current) => ({ ...current, [field]: value }));
     setNewUserErrors((current) => ({ ...current, [field]: "" }));
-    setUserManagementMessage("");
+    setUserManagementMessage(null);
   }
 
   function updateResetPasswordField(field, value) {
     setResetPasswordForm((current) => ({ ...current, [field]: value }));
     setResetPasswordErrors((current) => ({ ...current, [field]: "" }));
-    setUserManagementMessage("");
+    setUserManagementMessage(null);
   }
 
   function updateVehicleField(field, value) {
     setVehicleForm((current) => ({ ...current, [field]: value }));
     setVehicleErrors((current) => ({ ...current, [field]: "" }));
-    setUserManagementMessage("");
+    setUserManagementMessage(null);
   }
 
   function updateRegistryField(field, value) {
@@ -832,7 +918,7 @@ export function App() {
       return next;
     });
     setRegistryErrors((current) => ({ ...current, [field]: "" }));
-    setRegistryMessage("");
+    setRegistryMessage(null);
   }
 
   function updateRecordFilter(field, value) {
@@ -911,7 +997,7 @@ export function App() {
     });
 
     if (!response.ok) {
-      setUserManagementMessage(await readApiMessage(response));
+      setUserManagementMessage(createBannerMessage(await readApiMessage(response)));
       return;
     }
 
@@ -922,7 +1008,7 @@ export function App() {
     link.download = formatExportFileName();
     link.click();
     URL.revokeObjectURL(downloadUrl);
-    setUserManagementMessage("Excel 已导出");
+    setUserManagementMessage(createBannerMessage("Excel 已导出", "success"));
   }
 
   async function refreshSelectedVehicleMileage() {
@@ -961,7 +1047,7 @@ export function App() {
     }
 
     setLoginErrors(errors);
-    setLoginMessage("");
+    setLoginMessage(null);
 
     if (Object.keys(errors).length > 0) {
       return;
@@ -977,7 +1063,7 @@ export function App() {
     });
 
     if (!response.ok) {
-      setLoginMessage(await readApiMessage(response));
+      setLoginMessage(createBannerMessage(await readApiMessage(response)));
       return;
     }
 
@@ -987,7 +1073,7 @@ export function App() {
     setUser(nextUser);
     resetAdminModuleState();
     setLoginForm({ username: "", password: "" });
-    setRegistryMessage("");
+    setRegistryMessage(null);
     setRegistryErrors({});
 
     if (nextUser.role === "admin") {
@@ -1016,8 +1102,8 @@ export function App() {
     setSelectedVehicleId("");
     setRegistryForm(createEmptyRegistryForm());
     setRegistryErrors({});
-    setRegistryMessage("");
-    setLoginMessage("");
+    setRegistryMessage(null);
+    setLoginMessage(null);
   }
 
   async function handleChangePassword(event) {
@@ -1041,17 +1127,17 @@ export function App() {
     }
 
     if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-      setPasswordMessage("两次新密码不一致");
+      setPasswordMessage(createBannerMessage("两次新密码不一致"));
       return;
     }
 
     if (passwordForm.newPassword === passwordForm.currentPassword) {
-      setPasswordMessage("新密码不能与当前密码相同");
+      setPasswordMessage(createBannerMessage("新密码不能与当前密码相同"));
       return;
     }
 
     if (!isComplexPassword(passwordForm.newPassword)) {
-      setPasswordMessage("新密码需至少 6 位且同时包含字母和数字");
+      setPasswordMessage(createBannerMessage("新密码需至少 6 位且同时包含字母和数字"));
       return;
     }
 
@@ -1065,7 +1151,7 @@ export function App() {
     });
 
     if (!response.ok) {
-      setPasswordMessage(await readApiMessage(response));
+      setPasswordMessage(createBannerMessage(await readApiMessage(response)));
       return;
     }
 
@@ -1073,7 +1159,7 @@ export function App() {
     setUser(null);
     setView(employeeRegistryView);
     resetAdminModuleState();
-    setLoginMessage(message);
+    setLoginMessage(createBannerMessage(message, "success"));
   }
 
   function openAdminHome() {
@@ -1089,7 +1175,7 @@ export function App() {
     });
 
     if (!response.ok) {
-      setUserManagementMessage(await readApiMessage(response));
+      setUserManagementMessage(createBannerMessage(await readApiMessage(response)));
       return;
     }
 
@@ -1113,7 +1199,7 @@ export function App() {
     });
 
     if (!response.ok) {
-      setUserManagementMessage(await readApiMessage(response));
+      setUserManagementMessage(createBannerMessage(await readApiMessage(response)));
       return;
     }
 
@@ -1158,7 +1244,7 @@ export function App() {
     });
 
     if (!response.ok) {
-      setUserManagementMessage(await readApiMessage(response));
+      setUserManagementMessage(createBannerMessage(await readApiMessage(response)));
       return;
     }
 
@@ -1167,7 +1253,7 @@ export function App() {
     setNewUserForm({ username: "", password: "", role: "employee" });
     setNewUserErrors({});
     setIsAddUserOpen(false);
-    setUserManagementMessage("用户已新增");
+    setUserManagementMessage(createBannerMessage("用户已新增", "success"));
   }
 
   async function handleCreateVehicle(event) {
@@ -1200,7 +1286,7 @@ export function App() {
     });
 
     if (!response.ok) {
-      setUserManagementMessage(await readApiMessage(response));
+      setUserManagementMessage(createBannerMessage(await readApiMessage(response)));
       return;
     }
 
@@ -1209,10 +1295,40 @@ export function App() {
       [...current, body.vehicle].sort((left, right) => left.vehicleCode.localeCompare(right.vehicleCode))
     );
     setSelectedVehicleId((current) => current || body.vehicle.id);
-    setVehicleForm({ vehicleCode: "", plateNumber: "", brandModel: "" });
+    setVehicleForm({ vehicleCode: "", plateNumber: "", brandModel: "", status: "available" });
     setVehicleErrors({});
     setIsAddVehicleOpen(false);
-    setUserManagementMessage("车辆已新增");
+    setUserManagementMessage(createBannerMessage("车辆已新增", "success"));
+  }
+
+  async function confirmVehicleStatusChange() {
+    if (!pendingVehicleStatusChange) {
+      return;
+    }
+
+    const { vehicleId, nextStatus } = pendingVehicleStatusChange;
+    const response = await fetch(`/api/vehicles/${vehicleId}/status`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ status: nextStatus })
+    });
+
+    if (!response.ok) {
+      setUserManagementMessage(createBannerMessage(await readApiMessage(response)));
+      return;
+    }
+
+    const body = await response.json();
+    setVehicles((current) =>
+      current.map((vehicle) => (vehicle.id === vehicleId ? body.vehicle : vehicle))
+    );
+    setPendingVehicleStatusChange(null);
+    setUserManagementMessage(
+      createBannerMessage(nextStatus === "idle" ? "车辆已设为闲置" : "车辆已设为可用", "success")
+    );
   }
 
   async function confirmDeleteUser() {
@@ -1226,7 +1342,7 @@ export function App() {
     });
 
     if (!response.ok) {
-      setUserManagementMessage(await readApiMessage(response));
+      setUserManagementMessage(createBannerMessage(await readApiMessage(response)));
       return;
     }
 
@@ -1234,7 +1350,7 @@ export function App() {
       current.filter((managedUser) => managedUser.id !== pendingDeleteUser.id)
     );
     setPendingDeleteUser(null);
-    setUserManagementMessage("用户已删除");
+    setUserManagementMessage(createBannerMessage("用户已删除", "success"));
   }
 
   async function confirmDeleteVehicle() {
@@ -1251,7 +1367,7 @@ export function App() {
     });
 
     if (!response.ok) {
-      setUserManagementMessage(await readApiMessage(response));
+      setUserManagementMessage(createBannerMessage(await readApiMessage(response)));
       return;
     }
 
@@ -1263,7 +1379,7 @@ export function App() {
     setSelectedVehicleId((current) =>
       current === deletingVehicleId ? remainingVehicles[0]?.id ?? "" : current
     );
-    setUserManagementMessage("车辆已删除");
+    setUserManagementMessage(createBannerMessage("车辆已删除", "success"));
   }
 
   async function confirmDeleteRecord() {
@@ -1278,14 +1394,14 @@ export function App() {
     });
 
     if (!response.ok) {
-      setUserManagementMessage(await readApiMessage(response));
+      setUserManagementMessage(createBannerMessage(await readApiMessage(response)));
       return;
     }
 
     setManagedRecords((current) => current.filter((record) => record.id !== pendingDeleteRecord.id));
     setPendingDeleteRecord(null);
     setExpandedRecordId((current) => (current === pendingDeleteRecord.id ? "" : current));
-    setUserManagementMessage("记录已删除");
+    setUserManagementMessage(createBannerMessage("记录已删除", "success"));
 
     if (deletedVehicleId === selectedVehicleId) {
       await refreshSelectedVehicleMileage();
@@ -1294,7 +1410,7 @@ export function App() {
 
   async function confirmBatchDeleteRecords() {
     if (selectedRecordIds.length === 0) {
-      setUserManagementMessage("请选择至少一条记录");
+      setUserManagementMessage(createBannerMessage("请选择至少一条记录"));
       return;
     }
 
@@ -1308,7 +1424,7 @@ export function App() {
     });
 
     if (!response.ok) {
-      setUserManagementMessage(await readApiMessage(response));
+      setUserManagementMessage(createBannerMessage(await readApiMessage(response)));
       return;
     }
 
@@ -1319,7 +1435,7 @@ export function App() {
     setExpandedRecordId((current) => (selectedRecordIds.includes(current) ? "" : current));
     setSelectedRecordIds([]);
     setIsBulkDeleteOpen(false);
-    setUserManagementMessage(body.message ?? "记录已批量删除");
+    setUserManagementMessage(createBannerMessage(body.message ?? "记录已批量删除", "success"));
   }
 
   async function handleResetPassword(event) {
@@ -1340,7 +1456,7 @@ export function App() {
     }
 
     if (resetPasswordForm.newPassword !== resetPasswordForm.confirmPassword) {
-      setUserManagementMessage("两次新密码不一致");
+      setUserManagementMessage(createBannerMessage("两次新密码不一致"));
       return;
     }
 
@@ -1354,14 +1470,14 @@ export function App() {
     });
 
     if (!response.ok) {
-      setUserManagementMessage(await readApiMessage(response));
+      setUserManagementMessage(createBannerMessage(await readApiMessage(response)));
       return;
     }
 
     setResetUser(null);
     setResetPasswordErrors({});
     setResetPasswordForm({ newPassword: "", confirmPassword: "" });
-    setUserManagementMessage("密码已重置");
+    setUserManagementMessage(createBannerMessage("密码已重置", "success"));
   }
 
   async function handleRegistrySubmit(event) {
@@ -1419,7 +1535,7 @@ export function App() {
         ...current,
         endMileage: "终点公里不能小于起步公里"
       }));
-      setRegistryMessage("终点公里不能小于起步公里");
+      setRegistryMessage(createBannerMessage("终点公里不能小于起步公里"));
       return;
     }
 
@@ -1428,7 +1544,7 @@ export function App() {
         ...current,
         returnTime: "还车时间不能小于出车时间"
       }));
-      setRegistryMessage("还车时间不能小于出车时间");
+      setRegistryMessage(createBannerMessage("还车时间不能小于出车时间"));
       return;
     }
 
@@ -1457,7 +1573,7 @@ export function App() {
     });
 
     if (!response.ok) {
-      setRegistryMessage(await readApiMessage(response));
+      setRegistryMessage(createBannerMessage(await readApiMessage(response)));
       return;
     }
 
@@ -1467,7 +1583,7 @@ export function App() {
         ? String(endMileage)
         : String(body.record.endMileage);
 
-    setRegistryMessage(body.message ?? "登记已提交");
+    setRegistryMessage(createBannerMessage(body.message ?? "登记已提交", "success"));
     setRegistryErrors({});
     setRegistryForm(
       createEmptyRegistryForm({
@@ -1510,6 +1626,7 @@ export function App() {
     filteredManagedRecords.every((record) => selectedRecordIds.includes(record.id));
   const deleteModalConfig = pendingDeleteUser
     ? {
+        title: "确认删除",
         ariaLabel: "删除用户确认",
         body: `确认删除账号「${pendingDeleteUser.username}」？此操作不可撤销。`,
         onCancel: () => setPendingDeleteUser(null),
@@ -1517,13 +1634,15 @@ export function App() {
       }
     : pendingDeleteVehicle
       ? {
+          title: "确认删除",
           ariaLabel: "删除车辆确认",
-          body: `确认删除车辆「${pendingDeleteVehicle.vehicleCode}」？此操作不可撤销。`,
+          body: `确认删除车辆「${pendingDeleteVehicle.plateNumber}-${pendingDeleteVehicle.brandModel}」？此操作不可撤销。`,
           onCancel: () => setPendingDeleteVehicle(null),
           onConfirm: confirmDeleteVehicle
         }
       : pendingDeleteRecord
         ? {
+            title: "确认删除",
             ariaLabel: "删除记录确认",
             body: `确认删除记录「${summarizeRecord(pendingDeleteRecord)}」？此操作不可撤销。`,
             onCancel: () => setPendingDeleteRecord(null),
@@ -1531,11 +1650,23 @@ export function App() {
           }
         : isBulkDeleteOpen
           ? {
+              title: "确认删除",
               ariaLabel: "批量删除记录确认",
               body: `确认删除已选 ${selectedRecordIds.length} 条记录？此操作不可撤销。`,
               onCancel: () => setIsBulkDeleteOpen(false),
               onConfirm: confirmBatchDeleteRecords
             }
+          : pendingVehicleStatusChange
+            ? {
+                title: "确认操作",
+                ariaLabel: "车辆状态切换确认",
+                body: `确认将车辆「${pendingVehicleStatusChange.vehicleCode}」设为${
+                  pendingVehicleStatusChange.nextStatus === "idle" ? "闲置" : "可用"
+                }？`,
+                confirmLabel: "确认操作",
+                onCancel: () => setPendingVehicleStatusChange(null),
+                onConfirm: confirmVehicleStatusChange
+              }
           : null;
 
   if (!user) {
@@ -1579,7 +1710,7 @@ export function App() {
                 onChange={(event) => updateLoginField("password", event.target.value)}
               />
 
-              {loginMessage ? <p className="message banner-message">{loginMessage}</p> : null}
+              <BannerMessage message={loginMessage} />
 
               <button className="primary-button primary-button-large" type="submit">
                 登录
@@ -1639,7 +1770,7 @@ export function App() {
                   value={selectedVehicleId}
                   onChange={(event) => {
                     setSelectedVehicleId(event.target.value);
-                    setRegistryMessage("");
+                    setRegistryMessage(null);
                   }}
                 >
                   {vehicles.length === 0 ? <option value="">暂无可用车辆</option> : null}
@@ -1796,7 +1927,7 @@ export function App() {
                 </label>
               </div>
 
-              {registryMessage ? <p className="message banner-message">{registryMessage}</p> : null}
+              <BannerMessage message={registryMessage} />
 
               <div className="action-row action-row-split registry-actions">
                 <button className="primary-button primary-button-large" type="submit">
@@ -1807,7 +1938,7 @@ export function App() {
                   type="button"
                   onClick={() => {
                     closeInlinePanels();
-                    setPasswordMessage("");
+                    setPasswordMessage(null);
                     setPasswordErrors({});
                     setIsPasswordDialogOpen(true);
                   }}
@@ -1830,7 +1961,7 @@ export function App() {
             setIsPasswordDialogOpen(false);
             setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
             setPasswordErrors({});
-            setPasswordMessage("");
+            setPasswordMessage(null);
           }}
         >
           <form className="bottom-sheet-form form" onSubmit={handleChangePassword} noValidate>
@@ -1859,7 +1990,7 @@ export function App() {
               onChange={(event) => updatePasswordField("confirmPassword", event.target.value)}
             />
 
-            {passwordMessage ? <p className="message banner-message">{passwordMessage}</p> : null}
+            <BannerMessage message={passwordMessage} />
 
             <div className="action-row sheet-actions sheet-actions-primary-only">
               <button className="primary-button primary-button-large" type="submit">
@@ -1871,7 +2002,7 @@ export function App() {
         <ConfirmDeleteModal
           {...(deleteModalConfig ?? {})}
           open={Boolean(deleteModalConfig)}
-          title="确认删除"
+          title={deleteModalConfig?.title ?? "确认删除"}
         />
       </main>
     );
@@ -1905,7 +2036,7 @@ export function App() {
               </button>
             </section>
 
-            {userManagementMessage ? <p className="message banner-message">{userManagementMessage}</p> : null}
+            <BannerMessage message={userManagementMessage} />
 
             <section className="nav-card-list" aria-label="管理员导航">
               <button className="module-nav-card" type="button" onClick={openAdminUsers}>
@@ -1979,7 +2110,7 @@ export function App() {
                 onClick={() => {
                   closeInlinePanels();
                   setNewUserErrors({});
-                  setUserManagementMessage("");
+                  setUserManagementMessage(null);
                   setIsAddUserOpen(true);
                 }}
               >
@@ -1994,7 +2125,7 @@ export function App() {
                 onClick={() => {
                   closeInlinePanels();
                   setVehicleErrors({});
-                  setUserManagementMessage("");
+                  setUserManagementMessage(null);
                   setIsAddVehicleOpen(true);
                 }}
               >
@@ -2019,7 +2150,7 @@ export function App() {
             {view === adminUsersView ? (
               <section className="management-panel" aria-label="用户账号管理">
                 <p className="module-count">共 {managedUsers.length} 个账号</p>
-                {userManagementMessage ? <p className="message banner-message">{userManagementMessage}</p> : null}
+                <BannerMessage message={userManagementMessage} />
 
                 <div className="entity-list">
                   {managedUsers.length === 0 ? <p className="empty-state">暂无用户</p> : null}
@@ -2058,7 +2189,7 @@ export function App() {
                                 closeInlinePanels();
                                 setResetPasswordErrors({});
                                 setResetPasswordForm({ newPassword: "", confirmPassword: "" });
-                                setUserManagementMessage("");
+                                setUserManagementMessage(null);
                                 setResetUser(managedUser);
                               }}
                             >
@@ -2073,12 +2204,12 @@ export function App() {
                               type="button"
                               onClick={() => {
                                 if (managedUser.username === user.username && user.username !== "admin") {
-                                  setUserManagementMessage("不能删除当前登录管理员账号");
+                                  setUserManagementMessage(createBannerMessage("不能删除当前登录管理员账号"));
                                   return;
                                 }
 
                                 closeInlinePanels();
-                                setUserManagementMessage("");
+                                setUserManagementMessage(null);
                                 setPendingDeleteUser(managedUser);
                               }}
                             >
@@ -2097,7 +2228,7 @@ export function App() {
             {view === adminVehiclesView ? (
               <section className="management-panel" aria-label="公车档案管理">
                 <p className="module-count">共 {vehicles.length} 辆车辆</p>
-                {userManagementMessage ? <p className="message banner-message">{userManagementMessage}</p> : null}
+                <BannerMessage message={userManagementMessage} />
 
                 <div className="entity-list">
                   {vehicles.length === 0 ? <p className="empty-state">暂无车辆</p> : null}
@@ -2126,12 +2257,28 @@ export function App() {
                         </div>
                         <div className="action-row entity-actions">
                           <button
+                            aria-label={`设为${usageStatus === "闲置" ? "可用" : "闲置"} ${vehicle.vehicleCode}`}
+                            className="secondary-button vehicle-status-action"
+                            type="button"
+                            onClick={() => {
+                              closeInlinePanels();
+                              setUserManagementMessage(null);
+                              setPendingVehicleStatusChange({
+                                vehicleId: vehicle.id,
+                                vehicleCode: vehicle.vehicleCode,
+                                nextStatus: usageStatus === "闲置" ? "available" : "idle"
+                              });
+                            }}
+                          >
+                            设为{usageStatus === "闲置" ? "可用" : "闲置"}
+                          </button>
+                          <button
                             aria-label={`删除车辆 ${vehicle.vehicleCode}`}
                             className="ghost-button ghost-button-danger"
                             type="button"
                             onClick={() => {
                               closeInlinePanels();
-                              setUserManagementMessage("");
+                              setUserManagementMessage(null);
                               setPendingDeleteVehicle(vehicle);
                             }}
                           >
@@ -2148,7 +2295,7 @@ export function App() {
 
             {view === adminRecordsView ? (
               <section className="management-panel" aria-label="用车记录管理">
-                {userManagementMessage ? <p className="message banner-message">{userManagementMessage}</p> : null}
+                <BannerMessage message={userManagementMessage} />
 
                 <section className="sheet-card filter-card">
                   <div className="filter-grid filter-grid-records">
@@ -2210,7 +2357,7 @@ export function App() {
                     type="button"
                     onClick={() => {
                       setPendingDeleteRecord(null);
-                      setUserManagementMessage("");
+                      setUserManagementMessage(null);
                       setIsBulkDeleteOpen(false);
                       setSelectedRecordIds((current) =>
                         areAllFilteredRecordsSelected ? [] : filteredManagedRecords.map((record) => record.id)
@@ -2233,7 +2380,7 @@ export function App() {
                         }
 
                         setPendingDeleteRecord(null);
-                        setUserManagementMessage("");
+                        setUserManagementMessage(null);
                         setIsBulkDeleteOpen(true);
                       }}
                     >
@@ -2253,6 +2400,10 @@ export function App() {
                   ) : null}
                   {filteredManagedRecords.map((record) => {
                     const isExpanded = expandedRecordId === record.id;
+                    const departureDateTime = formatManagedRecordDateTime(record, record.departureTime);
+                    const returnDateTime = formatManagedRecordDateTime(record, record.returnTime, {
+                      isReturn: true
+                    });
 
                     return (
                       <article className={`record-card ${isExpanded ? "record-card-expanded" : ""}`} key={record.id}>
@@ -2262,7 +2413,7 @@ export function App() {
                               checked={selectedRecordIds.includes(record.id)}
                               type="checkbox"
                               onChange={() => {
-                                setUserManagementMessage("");
+                                setUserManagementMessage(null);
                                 setPendingDeleteRecord(null);
                                 setIsBulkDeleteOpen(false);
                                 setSelectedRecordIds((current) =>
@@ -2279,7 +2430,7 @@ export function App() {
                             className="record-summary-button"
                             type="button"
                             onClick={() => {
-                              setUserManagementMessage("");
+                              setUserManagementMessage(null);
                               setPendingDeleteRecord(null);
                               setExpandedRecordId((current) => (current === record.id ? "" : record.id));
                             }}
@@ -2302,7 +2453,7 @@ export function App() {
                               <small>路线：{record.route}</small>
                               <small>加油：{formatFuelDisplay(record.fuelFee, record.fuelVolume)}</small>
                               <small>
-                                {record.departureTime}-{record.returnTime} · {record.distance} 公里
+                                {departureDateTime}-{returnDateTime} · {record.distance} 公里
                                 {record.isCrossDay ? " · 跨天" : ""}
                                 {record.remark ? ` · ${record.remark}` : ""}
                               </small>
@@ -2311,7 +2462,7 @@ export function App() {
                                 className="ghost-button ghost-button-danger record-delete-button"
                                 type="button"
                                 onClick={() => {
-                                  setUserManagementMessage("");
+                                  setUserManagementMessage(null);
                                   setPendingDeleteUser(null);
                                   setPendingDeleteVehicle(null);
                                   setIsBulkDeleteOpen(false);
@@ -2452,7 +2603,7 @@ export function App() {
         onClose={() => {
           setIsAddVehicleOpen(false);
           setVehicleErrors({});
-          setVehicleForm({ vehicleCode: "", plateNumber: "", brandModel: "" });
+          setVehicleForm({ vehicleCode: "", plateNumber: "", brandModel: "", status: "available" });
         }}
       >
         <form className="bottom-sheet-form form" onSubmit={handleCreateVehicle} noValidate>
@@ -2486,6 +2637,16 @@ export function App() {
             />
             {vehicleErrors.brandModel ? <small className="error">{vehicleErrors.brandModel}</small> : null}
           </label>
+          <label className="field">
+            <span>车辆状态</span>
+            <select
+              value={vehicleForm.status}
+              onChange={(event) => updateVehicleField("status", event.target.value)}
+            >
+              <option value="available">可用</option>
+              <option value="idle">闲置</option>
+            </select>
+          </label>
           <div className="action-row sheet-actions sheet-actions-split">
             <button
               className="ghost-button"
@@ -2493,7 +2654,7 @@ export function App() {
               onClick={() => {
                 setIsAddVehicleOpen(false);
                 setVehicleErrors({});
-                setVehicleForm({ vehicleCode: "", plateNumber: "", brandModel: "" });
+                setVehicleForm({ vehicleCode: "", plateNumber: "", brandModel: "", status: "available" });
               }}
             >
               取消
@@ -2539,7 +2700,7 @@ export function App() {
             onChange={(event) => updatePasswordField("confirmPassword", event.target.value)}
           />
 
-          {passwordMessage ? <p className="message banner-message">{passwordMessage}</p> : null}
+          <BannerMessage message={passwordMessage} />
 
           <div className="action-row sheet-actions sheet-actions-primary-only">
             <button className="primary-button primary-button-large" type="submit">
@@ -2552,7 +2713,7 @@ export function App() {
       <ConfirmDeleteModal
         {...(deleteModalConfig ?? {})}
         open={Boolean(deleteModalConfig)}
-        title="确认删除"
+        title={deleteModalConfig?.title ?? "确认删除"}
       />
     </main>
   );

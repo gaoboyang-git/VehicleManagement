@@ -58,3 +58,40 @@ describe("Issue 0 database initialization", () => {
     60000
   );
 });
+
+describe("Issue 6 vehicle status database defaults", () => {
+  it(
+    "adds a vehicle status column that defaults to available for new rows",
+    async () => {
+      const tempDir = mkdtempSync(path.join(tmpdir(), "vehicle-status-db-"));
+      const databaseUrl = `file:${path.join(tempDir, "issue6.db")}`;
+
+      try {
+        run("npx", ["prisma", "migrate", "deploy"], databaseUrl);
+
+        const prisma = new PrismaClient({
+          datasources: {
+            db: {
+              url: databaseUrl
+            }
+          }
+        });
+
+        const vehicle = await prisma.vehicle.create({
+          data: {
+            vehicleCode: "CAR-001",
+            plateNumber: "沪A-10001",
+            brandModel: "大众帕萨特"
+          }
+        });
+
+        await prisma.$disconnect();
+
+        expect(vehicle.status).toBe("available");
+      } finally {
+        rmSync(tempDir, { force: true, recursive: true });
+      }
+    },
+    60000
+  );
+});
