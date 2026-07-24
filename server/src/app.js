@@ -200,6 +200,11 @@ const recordExportHeaders = [
   "备注"
 ];
 
+const multiVehicleRecordExportHeaders = [
+  "车牌号",
+  ...recordExportHeaders
+];
+
 function parseMileage(value) {
   const text = String(value ?? "").trim();
 
@@ -829,21 +834,30 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
     requireAdmin,
     asyncHandler(async (request, response) => {
       const records = await loadManagedRecords(prisma, readRecordFilters(request));
+      const uniquePlateNumbers = new Set(
+        records.map((record) => record.vehicle?.plateNumber).filter(Boolean)
+      );
+      const useMultiVehicleTemplate = uniquePlateNumbers.size > 1;
       const rows = [
-        recordExportHeaders,
-        ...records.map((record) => [
-          record.businessDate,
-          formatManagedRecordDateTime(record, record.departureTime),
-          formatManagedRecordDateTime(record, record.returnTime, { isReturn: true }),
-          record.reason,
-          record.route,
-          record.startMileage,
-          record.endMileage,
-          record.distance,
-          formatFuelExportValue(record.fuelFee, record.fuelVolume),
-          record.driverSignature,
-          record.remark ?? ""
-        ])
+        useMultiVehicleTemplate ? multiVehicleRecordExportHeaders : recordExportHeaders,
+        ...records.map((record) => {
+          const plateNumber = record.vehicle?.plateNumber ?? "";
+          const baseRow = [
+            record.businessDate,
+            formatManagedRecordDateTime(record, record.departureTime),
+            formatManagedRecordDateTime(record, record.returnTime, { isReturn: true }),
+            record.reason,
+            record.route,
+            record.startMileage,
+            record.endMileage,
+            record.distance,
+            formatFuelExportValue(record.fuelFee, record.fuelVolume),
+            record.driverSignature,
+            record.remark ?? ""
+          ];
+
+          return useMultiVehicleTemplate ? [plateNumber, ...baseRow] : baseRow;
+        })
       ];
       const workbook = XLSX.utils.book_new();
       const sheet = XLSX.utils.aoa_to_sheet(rows);

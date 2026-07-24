@@ -1054,6 +1054,7 @@ describe("Issue 4 registry API", () => {
     );
     expect(response.headers["content-disposition"]).toContain("attachment");
     expect(rows[0]).toEqual([
+      "车牌号",
       "日期",
       "出车时间",
       "还车时间",
@@ -1067,24 +1068,30 @@ describe("Issue 4 registry API", () => {
       "备注"
     ]);
     expect(rows.slice(1).map((row) => row[0])).toEqual([
+      "沪A-10003",
+      "沪A-10002",
+      "沪A-10001",
+      "沪A-10001"
+    ]);
+    expect(rows.slice(1).map((row) => row[1])).toEqual([
       "2026-07-20",
       "2026-07-20",
       "2026-07-20",
       "2026-07-19"
     ]);
-    expect(rows.slice(1).map((row) => row[3])).toEqual([
+    expect(rows.slice(1).map((row) => row[4])).toEqual([
       "REC-C",
       "REC-B",
       "REC-A-NEW",
       "REC-A-OLD"
     ]);
-    expect(rows.slice(1).map((row) => row[1])).toEqual([
+    expect(rows.slice(1).map((row) => row[2])).toEqual([
       "2026-07-20 15:00",
       "2026-07-20 13:00",
       "2026-07-20 09:00",
       "2026-07-19 08:00"
     ]);
-    expect(rows.slice(1).map((row) => row[2])).toEqual([
+    expect(rows.slice(1).map((row) => row[3])).toEqual([
       "2026-07-20 16:00",
       "2026-07-20 14:00",
       "2026-07-20 10:00",
@@ -1148,6 +1155,19 @@ describe("Issue 4 registry API", () => {
 
     expect(response.status).toBe(200);
     expect(rows).toHaveLength(2);
+    expect(rows[0]).toEqual([
+      "日期",
+      "出车时间",
+      "还车时间",
+      "事由",
+      "目的地及行车路线",
+      "起步公里读数",
+      "终点公里读数",
+      "行车公里数",
+      "加油费用/数量",
+      "驾驶员签字",
+      "备注"
+    ]);
     expect(rows[1][0]).toBe("2026-07-21");
     expect(rows[1][1]).toBe("2026-07-21 09:00");
     expect(rows[1][2]).toBe("2026-07-21 10:00");
