@@ -285,12 +285,12 @@ describe("Issue 4 registry API", () => {
     );
   });
 
-  it("rejects registry submits when the selected vehicle is idle", async () => {
+  it("allows registry submits when the selected vehicle is in use", async () => {
     const vehicle = await createVehicle(prisma, {
       vehicleCode: "CAR-001",
       plateNumber: "沪A-10001",
       brandModel: "大众帕萨特",
-      status: "idle"
+      status: "inUse"
     });
     const agent = await employeeAgent();
 
@@ -309,9 +309,15 @@ describe("Issue 4 registry API", () => {
       remark: ""
     });
 
-    expect(response.status).toBe(400);
-    expect(response.body).toEqual({ message: "车辆当前不可用，请重新选择" });
-    expect(await prisma.vehicleUseRecord.count()).toBe(0);
+    expect(response.status).toBe(201);
+    expect(response.body.record).toEqual(
+      expect.objectContaining({
+        vehicleId: vehicle.id,
+        distance: 120,
+        isCrossDay: false
+      })
+    );
+    expect(await prisma.vehicleUseRecord.count()).toBe(1);
   });
 
   it("lets an administrator submit a cross-day registry record with explicit next-day datetime values", async () => {
@@ -709,29 +715,30 @@ describe("Issue 4 registry API", () => {
     expect(response.status).toBe(200);
     expect(response.body.records).toHaveLength(3);
     expect(response.body.records.map((record) => record.reason)).toEqual([
-      "REC-A-OLD",
+      "REC-B",
       "REC-A-NEW",
-      "REC-B"
+      "REC-A-OLD"
     ]);
     expect(response.body.records[0]).toEqual(
-      expect.objectContaining({
-        vehicleCode: "CAR-001",
-        plateNumber: "沪A-10001",
-        registrantUsername: "employee",
-        businessDate: "2026-07-19",
-        departureTime: "08:00",
-        returnTime: "09:00",
-        fuelFee: "0",
-        fuelVolume: "0",
-        driverSignature: "张三"
-      })
-    );
-    expect(response.body.records[2]).toEqual(
       expect.objectContaining({
         vehicleCode: "CAR-002",
         plateNumber: "沪A-10002",
         registrantUsername: "employee",
+        businessDate: "2026-07-20",
+        departureTime: "12:00",
+        returnTime: "13:00",
+        fuelFee: "0",
+        fuelVolume: "0",
+        driverSignature: "王五",
         reason: "REC-B"
+      })
+    );
+    expect(response.body.records[2]).toEqual(
+      expect.objectContaining({
+        vehicleCode: "CAR-001",
+        plateNumber: "沪A-10001",
+        registrantUsername: "employee",
+        reason: "REC-A-OLD"
       })
     );
   });
@@ -1060,28 +1067,28 @@ describe("Issue 4 registry API", () => {
       "备注"
     ]);
     expect(rows.slice(1).map((row) => row[0])).toEqual([
-      "2026-07-19",
       "2026-07-20",
       "2026-07-20",
-      "2026-07-20"
+      "2026-07-20",
+      "2026-07-19"
     ]);
     expect(rows.slice(1).map((row) => row[3])).toEqual([
-      "REC-A-OLD",
-      "REC-A-NEW",
+      "REC-C",
       "REC-B",
-      "REC-C"
+      "REC-A-NEW",
+      "REC-A-OLD"
     ]);
     expect(rows.slice(1).map((row) => row[1])).toEqual([
-      "2026-07-19 08:00",
-      "2026-07-20 09:00",
+      "2026-07-20 15:00",
       "2026-07-20 13:00",
-      "2026-07-20 15:00"
+      "2026-07-20 09:00",
+      "2026-07-19 08:00"
     ]);
     expect(rows.slice(1).map((row) => row[2])).toEqual([
-      "2026-07-19 09:00",
-      "2026-07-20 10:00",
+      "2026-07-20 16:00",
       "2026-07-20 14:00",
-      "2026-07-20 16:00"
+      "2026-07-20 10:00",
+      "2026-07-19 09:00"
     ]);
     expect(rows.flat().includes("REC-DELETE")).toBe(false);
   });

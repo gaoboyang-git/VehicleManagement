@@ -190,7 +190,7 @@ function mockUserManagementFetch(
         return failJson(404, { message: "车辆不存在或已失效" });
       }
 
-      if (!["available", "idle"].includes(status)) {
+      if (!["available", "inUse"].includes(status)) {
         return failJson(400, { message: "车辆状态非法" });
       }
 
@@ -237,9 +237,7 @@ function mockRegistryFetch({
 
     if (pathname === "/api/vehicles" && method === "GET") {
       return okJson({
-        vehicles: vehicles.filter(
-          (vehicle) => !vehicle.isDeleted && (vehicle.status ?? "available") === "available"
-        )
+        vehicles: vehicles.filter((vehicle) => !vehicle.isDeleted)
       });
     }
 
@@ -271,10 +269,6 @@ function mockRegistryFetch({
 
       if (!vehicle) {
         return failJson(400, { message: "车辆不存在或已失效" });
-      }
-
-      if ((vehicle.status ?? "available") !== "available") {
-        return failJson(400, { message: "车辆当前不可用，请重新选择" });
       }
 
       const startMileage = Number(body.startMileage);
@@ -850,6 +844,8 @@ describe("Issue 3 vehicle management UI", () => {
     await loginAsAdminAndOpenManagement(user);
     await user.click(await screen.findByRole("button", { name: "新增车辆" }));
     expect(screen.getByRole("heading", { name: "新增车辆" })).toBeInTheDocument();
+    expect(screen.getByText("新增车辆默认状态为空闲中")).toBeInTheDocument();
+    expect(screen.queryByText("车辆状态")).not.toBeInTheDocument();
     await user.type(screen.getByLabelText("车辆编号"), "CAR-001");
     await user.type(screen.getByLabelText("车牌号码"), "沪A-10001");
     await user.type(screen.getByLabelText("品牌型号"), "大众帕萨特");
@@ -857,7 +853,7 @@ describe("Issue 3 vehicle management UI", () => {
 
     expect(await screen.findByText("沪A-10001")).toBeInTheDocument();
     expect(screen.getByText("大众帕萨特")).toBeInTheDocument();
-    expect(screen.getByText("可用")).toBeInTheDocument();
+    expect(screen.getByText("空闲中")).toBeInTheDocument();
   });
 
   it("shows duplicate vehicle code and plate number errors without changing the visible list", async () => {
@@ -878,7 +874,7 @@ describe("Issue 3 vehicle management UI", () => {
 
     render(<App />);
     await loginAsAdminAndOpenManagement(user);
-    expect(await screen.findByText("闲置")).toBeInTheDocument();
+    expect(await screen.findByText("使用中")).toBeInTheDocument();
     await user.click(await screen.findByRole("button", { name: "新增车辆" }));
     await user.type(screen.getByLabelText("车辆编号"), "CAR-001");
     await user.type(screen.getByLabelText("车牌号码"), "沪A-10002");
@@ -919,7 +915,7 @@ describe("Issue 3 vehicle management UI", () => {
     expect(screen.queryByText("沪A-CANCEL")).not.toBeInTheDocument();
   });
 
-  it("lets an administrator switch a vehicle between available and idle", async () => {
+  it("lets an administrator switch a vehicle between free and in-use labels", async () => {
     mockUserManagementFetch(
       [{ id: "admin-id", username: "admin", role: "admin", isBuiltinAdmin: true }],
       [
@@ -938,17 +934,17 @@ describe("Issue 3 vehicle management UI", () => {
     render(<App />);
     await loginAsAdminAndOpenManagement(user);
 
-    expect(await screen.findByText("可用")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "设为闲置 CAR-001" }));
-    expect(screen.getByText("确认将车辆「CAR-001」设为闲置？")).toBeInTheDocument();
+    expect(await screen.findByText("空闲中")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "设为使用中 CAR-001" }));
+    expect(screen.getByText("确认将车辆「沪A-10001-大众帕萨特」设为使用中？")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "确认操作" }));
 
-    expect(await screen.findByText("闲置")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "设为可用 CAR-001" }));
-    expect(screen.getByText("确认将车辆「CAR-001」设为可用？")).toBeInTheDocument();
+    expect(await screen.findByText("使用中")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "设为空闲中 CAR-001" }));
+    expect(screen.getByText("确认将车辆「沪A-10001-大众帕萨特」设为空闲中？")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "确认操作" }));
 
-    expect(await screen.findByText("可用")).toBeInTheDocument();
+    expect(await screen.findByText("空闲中")).toBeInTheDocument();
   });
 });
 
@@ -1255,7 +1251,7 @@ describe("Issue 4 registry UI", () => {
     expect(fuelVolumeInput).toHaveValue(20.3);
   });
 
-  it("shows only available vehicles in the employee registry selector", async () => {
+  it("shows all active vehicles in the employee registry selector and warns on in-use vehicles", async () => {
     mockRegistryFetch({
       vehicles: [
         {
@@ -1271,7 +1267,7 @@ describe("Issue 4 registry UI", () => {
           vehicleCode: "CAR-002",
           plateNumber: "沪A-10002",
           brandModel: "别克GL8",
-          status: "idle",
+          status: "inUse",
           isDeleted: false
         }
       ]
@@ -1284,7 +1280,10 @@ describe("Issue 4 registry UI", () => {
     const vehicleSelect = await screen.findByLabelText("车辆");
 
     expect(within(vehicleSelect).getByRole("option", { name: "CAR-001 + 沪A-10001" })).toBeInTheDocument();
-    expect(within(vehicleSelect).queryByRole("option", { name: "CAR-002 + 沪A-10002" })).not.toBeInTheDocument();
+    expect(within(vehicleSelect).getByRole("option", { name: "CAR-002 + 沪A-10002" })).toBeInTheDocument();
+
+    await user.selectOptions(vehicleSelect, "vehicle-b");
+    expect(await screen.findByText("当前车辆为使用中状态，请确认后登记")).toBeInTheDocument();
   });
 });
 

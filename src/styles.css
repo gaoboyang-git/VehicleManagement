@@ -762,6 +762,11 @@ p {
   font-weight: 700;
 }
 
+.field-hint {
+  color: #a45d00;
+  font-weight: 700;
+}
+
 .banner-message {
   border: 1px solid rgba(224, 63, 96, 0.16);
   border-radius: 18px;
@@ -1633,6 +1638,16 @@ body {
 
 .sheet-context-row strong {
   color: #0f1e45;
+}
+
+.sheet-helper-text {
+  margin: 0;
+  border-radius: 14px;
+  background: rgba(27, 53, 133, 0.05);
+  color: #6b7ca4;
+  padding: 12px 16px;
+  font-size: 14px;
+  line-height: 20px;
 }
 
 .sheet-actions-split {

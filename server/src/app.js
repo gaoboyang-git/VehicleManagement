@@ -239,11 +239,24 @@ function isValidNonNegativeDecimal(value) {
   return Number(text) >= 0;
 }
 
-const vehicleStatusValues = ["available", "idle"];
+const vehicleStatusValues = ["available", "inUse"];
 
 function readVehicleStatus(value, fallback = "available") {
   const status = String(value ?? "").trim();
-  return status || fallback;
+
+  if (!status) {
+    return fallback;
+  }
+
+  if (status === "idle" || status === "闲置" || status === "使用中" || status === "in_use") {
+    return "inUse";
+  }
+
+  if (status === "available" || status === "可用" || status === "空闲中") {
+    return "available";
+  }
+
+  return status;
 }
 
 function isValidVehicleStatus(status) {
@@ -297,15 +310,11 @@ async function loadManagedRecords(prisma, filters = {}) {
   return records
     .filter((record) => recordMatchesFilters(record, filters))
     .sort((left, right) => {
-      if (left.vehicle.vehicleCode !== right.vehicle.vehicleCode) {
-        return left.vehicle.vehicleCode.localeCompare(right.vehicle.vehicleCode);
-      }
-
       if (left.businessDate !== right.businessDate) {
-        return left.businessDate.localeCompare(right.businessDate);
+        return right.businessDate.localeCompare(left.businessDate);
       }
 
-      return left.createdAt.getTime() - right.createdAt.getTime();
+      return right.createdAt.getTime() - left.createdAt.getTime();
     });
 }
 
@@ -645,11 +654,10 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
   app.get(
     "/api/vehicles",
     requireLogin,
-    asyncHandler(async (request, response) => {
+    asyncHandler(async (_request, response) => {
       const vehicles = await prisma.vehicle.findMany({
         where: {
-          isDeleted: false,
-          ...(request.auth.user.role === "admin" ? {} : { status: "available" })
+          isDeleted: false
         },
         orderBy: {
           vehicleCode: "asc"
@@ -919,10 +927,6 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
 
       if (!vehicle || vehicle.isDeleted) {
         return response.status(400).json({ message: "车辆不存在或已失效" });
-      }
-
-      if (vehicle.status !== "available") {
-        return response.status(400).json({ message: "车辆当前不可用，请重新选择" });
       }
 
       const record = await prisma.vehicleUseRecord.create({

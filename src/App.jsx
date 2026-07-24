@@ -233,18 +233,22 @@ function getVehicleUsageStatus(vehicle) {
   if (
     vehicle?.status === "available" ||
     vehicle?.status === "可用" ||
-    vehicle?.isInUse === true ||
+    vehicle?.status === "空闲中"
+  ) {
+    return "空闲中";
+  }
+
+  if (
     vehicle?.status === "inUse" ||
+    vehicle?.status === "idle" ||
+    vehicle?.status === "闲置" ||
+    vehicle?.status === "使用中" ||
     vehicle?.status === "在用"
   ) {
-    return "可用";
+    return "使用中";
   }
 
-  if (vehicle?.isInUse === false || vehicle?.status === "idle" || vehicle?.status === "闲置") {
-    return "闲置";
-  }
-
-  return "可用";
+  return "空闲中";
 }
 
 function buildRecordQueryString(filters) {
@@ -801,6 +805,8 @@ export function App() {
     registrantUsername: "",
     businessDate: ""
   });
+  const selectedVehicle = vehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? null;
+  const selectedVehicleUsageStatus = getVehicleUsageStatus(selectedVehicle);
 
   useEffect(() => {
     if (!user || user.role === "admin" || view !== employeeRegistryView || !selectedVehicleId) {
@@ -1298,7 +1304,7 @@ export function App() {
     setVehicleForm({ vehicleCode: "", plateNumber: "", brandModel: "", status: "available" });
     setVehicleErrors({});
     setIsAddVehicleOpen(false);
-    setUserManagementMessage(createBannerMessage("车辆已新增", "success"));
+    setUserManagementMessage(createBannerMessage("车辆已新增，默认状态为空闲中", "success"));
   }
 
   async function confirmVehicleStatusChange() {
@@ -1327,7 +1333,7 @@ export function App() {
     );
     setPendingVehicleStatusChange(null);
     setUserManagementMessage(
-      createBannerMessage(nextStatus === "idle" ? "车辆已设为闲置" : "车辆已设为可用", "success")
+      createBannerMessage(nextStatus === "inUse" ? "车辆已设为使用中" : "车辆已设为空闲中", "success")
     );
   }
 
@@ -1660,8 +1666,12 @@ export function App() {
             ? {
                 title: "确认操作",
                 ariaLabel: "车辆状态切换确认",
-                body: `确认将车辆「${pendingVehicleStatusChange.vehicleCode}」设为${
-                  pendingVehicleStatusChange.nextStatus === "idle" ? "闲置" : "可用"
+                body: `确认将车辆「${
+                  pendingVehicleStatusChange.brandModel
+                    ? `${pendingVehicleStatusChange.plateNumber}-${pendingVehicleStatusChange.brandModel}`
+                    : pendingVehicleStatusChange.plateNumber
+                }」设为${
+                  pendingVehicleStatusChange.nextStatus === "inUse" ? "使用中" : "空闲中"
                 }？`,
                 confirmLabel: "确认操作",
                 onCancel: () => setPendingVehicleStatusChange(null),
@@ -1773,7 +1783,7 @@ export function App() {
                     setRegistryMessage(null);
                   }}
                 >
-                  {vehicles.length === 0 ? <option value="">暂无可用车辆</option> : null}
+                  {vehicles.length === 0 ? <option value="">暂无车辆</option> : null}
                   {vehicles.map((vehicle) => (
                     <option key={vehicle.id} value={vehicle.id}>
                       {vehicle.vehicleCode} + {vehicle.plateNumber}
@@ -1781,6 +1791,9 @@ export function App() {
                   ))}
                 </select>
                 {registryErrors.vehicleId ? <small className="error">{registryErrors.vehicleId}</small> : null}
+                {selectedVehicle && selectedVehicleUsageStatus === "使用中" ? (
+                  <small className="field-hint">当前车辆为使用中状态，请确认后登记</small>
+                ) : null}
               </label>
 
               <div className="field-grid">
@@ -2246,7 +2259,7 @@ export function App() {
                               <strong>{vehicle.plateNumber}</strong>
                               <span
                                 className={`vehicle-status-pill ${
-                                  usageStatus === "闲置" ? "vehicle-status-idle" : "vehicle-status-active"
+                                  usageStatus === "使用中" ? "vehicle-status-idle" : "vehicle-status-active"
                                 }`}
                               >
                                 {usageStatus}
@@ -2257,7 +2270,7 @@ export function App() {
                         </div>
                         <div className="action-row entity-actions">
                           <button
-                            aria-label={`设为${usageStatus === "闲置" ? "可用" : "闲置"} ${vehicle.vehicleCode}`}
+                            aria-label={`设为${usageStatus === "使用中" ? "空闲中" : "使用中"} ${vehicle.vehicleCode}`}
                             className="secondary-button vehicle-status-action"
                             type="button"
                             onClick={() => {
@@ -2266,11 +2279,13 @@ export function App() {
                               setPendingVehicleStatusChange({
                                 vehicleId: vehicle.id,
                                 vehicleCode: vehicle.vehicleCode,
-                                nextStatus: usageStatus === "闲置" ? "available" : "idle"
+                                plateNumber: vehicle.plateNumber,
+                                brandModel: vehicle.brandModel,
+                                nextStatus: usageStatus === "使用中" ? "available" : "inUse"
                               });
                             }}
                           >
-                            设为{usageStatus === "闲置" ? "可用" : "闲置"}
+                            设为{usageStatus === "使用中" ? "空闲中" : "使用中"}
                           </button>
                           <button
                             aria-label={`删除车辆 ${vehicle.vehicleCode}`}
@@ -2607,6 +2622,7 @@ export function App() {
         }}
       >
         <form className="bottom-sheet-form form" onSubmit={handleCreateVehicle} noValidate>
+          <p className="sheet-helper-text">新增车辆默认状态为空闲中</p>
           <label className="field">
             <span>车辆编号</span>
             <input
@@ -2636,16 +2652,6 @@ export function App() {
               onChange={(event) => updateVehicleField("brandModel", event.target.value)}
             />
             {vehicleErrors.brandModel ? <small className="error">{vehicleErrors.brandModel}</small> : null}
-          </label>
-          <label className="field">
-            <span>车辆状态</span>
-            <select
-              value={vehicleForm.status}
-              onChange={(event) => updateVehicleField("status", event.target.value)}
-            >
-              <option value="available">可用</option>
-              <option value="idle">闲置</option>
-            </select>
           </label>
           <div className="action-row sheet-actions sheet-actions-split">
             <button

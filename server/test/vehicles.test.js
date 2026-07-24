@@ -185,18 +185,18 @@ describe("Issue 3 vehicle management API", () => {
     }).expect(400);
   });
 
-  it("creates a vehicle with an explicit idle status and lets admins change status", async () => {
+  it("creates a vehicle with an explicit in-use status and lets admins change status", async () => {
     const agent = await adminAgent();
 
     const created = await agent.post("/api/vehicles").send({
       vehicleCode: "CAR-002",
       plateNumber: "沪A-10002",
       brandModel: "丰田凯美瑞",
-      status: "idle"
+      status: "inUse"
     });
 
     expect(created.status).toBe(201);
-    expect(created.body.vehicle.status).toBe("idle");
+    expect(created.body.vehicle.status).toBe("inUse");
 
     const switched = await agent.patch(`/api/vehicles/${created.body.vehicle.id}/status`).send({
       status: "available"
@@ -220,7 +220,7 @@ describe("Issue 3 vehicle management API", () => {
     });
 
     await admin.patch(`/api/vehicles/${vehicle.id}/status`).send({ status: "busy" }).expect(400);
-    await employee.patch(`/api/vehicles/${vehicle.id}/status`).send({ status: "idle" }).expect(403);
+    await employee.patch(`/api/vehicles/${vehicle.id}/status`).send({ status: "inUse" }).expect(403);
   });
 
   it("soft deletes a vehicle so it disappears from active vehicle lists", async () => {
