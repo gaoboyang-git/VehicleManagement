@@ -3606,3 +3606,48 @@ button:active,
     width: 100%;
   }
 }
+
+@media (min-width: 721px) {
+  .shell,
+  .shell-login {
+    padding: 0 0 56px;
+  }
+
+  .auth-layout,
+  .app-shell,
+  .module-shell {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+  }
+
+  .page-hero,
+  .page-surface,
+  .module-surface {
+    width: 100%;
+  }
+
+  .page-surface,
+  .module-surface {
+    border-radius: 30px 30px 0 0;
+  }
+
+  .bottom-sheet-overlay {
+    align-items: center;
+    justify-items: center;
+    place-items: center;
+    padding: 24px;
+  }
+
+  .bottom-sheet {
+    width: min(100%, 640px);
+    max-width: 640px;
+    max-height: min(90dvh, 760px);
+    border-radius: 24px;
+    box-shadow: 0 28px 70px rgba(13, 29, 70, 0.26);
+  }
+
+  .bottom-sheet-body {
+    max-height: calc(min(90dvh, 760px) - 76px);
+  }
+}
