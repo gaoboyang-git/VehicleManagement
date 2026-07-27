@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import adminHeaderCarIcon from "./assets/admin-home/header-car.png";
 import adminPasswordIcon from "./assets/admin-home/password.png";
 import adminRecordsIcon from "./assets/admin-home/records.png";
@@ -807,8 +807,10 @@ function SignatureCanvas({
   onChange,
   ariaLabel,
   className = "signature-pad",
-  minWidth = 280,
-  minHeight = 156
+  minWidth = 0,
+  minHeight = 156,
+  viewportWidth = 0,
+  viewportHeight = 0
 }) {
   const canvasRef = useRef(null);
   const isDrawingRef = useRef(false);
@@ -825,7 +827,7 @@ function SignatureCanvas({
     }
   }
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const canvas = canvasRef.current;
 
     if (!canvas) {
@@ -844,18 +846,18 @@ function SignatureCanvas({
       return;
     }
 
-    let frameId = 0;
-
     function paintCanvas() {
       const ratio = window.devicePixelRatio || 1;
       const rect = canvas.getBoundingClientRect();
-      const width = Math.max(rect.width, minWidth);
-      const height = Math.max(rect.height, minHeight);
+      const width = Math.max(viewportWidth || rect.width || minWidth, 1);
+      const height = Math.max(viewportHeight || rect.height || minHeight, minHeight);
 
       if (width <= 0 || height <= 0) {
         return;
       }
 
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
       canvas.width = width * ratio;
       canvas.height = height * ratio;
       context.setTransform(1, 0, 0, 1, 0, 0);
@@ -880,33 +882,8 @@ function SignatureCanvas({
       }
     }
 
-    function schedulePaint() {
-      window.cancelAnimationFrame(frameId);
-      frameId = window.requestAnimationFrame(paintCanvas);
-    }
-
-    schedulePaint();
-
-    const resizeObserver =
-      typeof ResizeObserver === "function"
-        ? new ResizeObserver(() => {
-            schedulePaint();
-          })
-        : null;
-
-    resizeObserver?.observe(canvas);
-    window.addEventListener("resize", schedulePaint);
-    window.addEventListener("orientationchange", schedulePaint);
-    window.visualViewport?.addEventListener?.("resize", schedulePaint);
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      resizeObserver?.disconnect();
-      window.removeEventListener("resize", schedulePaint);
-      window.removeEventListener("orientationchange", schedulePaint);
-      window.visualViewport?.removeEventListener?.("resize", schedulePaint);
-    };
-  }, [minHeight, minWidth, onChange, value]);
+    paintCanvas();
+  }, [minHeight, minWidth, onChange, value, viewportHeight, viewportWidth]);
 
   function getCanvasPoint(event) {
     const canvas = canvasRef.current;
@@ -927,8 +904,8 @@ function SignatureCanvas({
 
     const rect = canvas.getBoundingClientRect();
     const exportCanvas = document.createElement("canvas");
-    const exportWidth = Math.max(Math.round(rect.width), minWidth);
-    const exportHeight = Math.max(Math.round(rect.height), minHeight);
+    const exportWidth = Math.max(Math.round(viewportWidth || rect.width), 1);
+    const exportHeight = Math.max(Math.round(viewportHeight || rect.height), minHeight);
     const exportContext = exportCanvas.getContext("2d");
 
     if (!exportContext) {
@@ -1013,44 +990,130 @@ function SignatureCanvas({
 }
 
 function SignatureEditorSheet({ open, value, onChange, currentName, onClose, onClear }) {
+  const containerRef = useRef(null);
+  const shellRef = useRef(null);
+  const [surfaceSize, setSurfaceSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    if (!open || isJsdomEnvironment()) {
+      return;
+    }
+
+    const isMobileLikeDevice =
+      window.matchMedia?.("(pointer: coarse)").matches || window.innerWidth <= 720;
+
+    if (!isMobileLikeDevice) {
+      return;
+    }
+
+    let orientationLocked = false;
+
+    async function enterImmersiveMode() {
+      try {
+        if (window.innerWidth < window.innerHeight && screen.orientation?.lock) {
+          await screen.orientation.lock("landscape");
+          orientationLocked = true;
+        }
+      } catch {}
+    }
+
+    enterImmersiveMode();
+
+    return () => {
+      if (orientationLocked && screen.orientation?.unlock) {
+        try {
+          screen.orientation.unlock();
+        } catch {}
+      }
+    };
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const shell = shellRef.current;
+    if (!shell) {
+      return;
+    }
+
+    function updateSurfaceSize() {
+      const rect = shell.getBoundingClientRect();
+      setSurfaceSize({
+        width: Math.max(Math.round(rect.width), 0),
+        height: Math.max(Math.round(rect.height), 0)
+      });
+    }
+
+    updateSurfaceSize();
+
+    const resizeObserver =
+      typeof ResizeObserver === "function"
+        ? new ResizeObserver(() => {
+            updateSurfaceSize();
+          })
+        : null;
+
+    resizeObserver?.observe(shell);
+    window.addEventListener("resize", updateSurfaceSize);
+    window.addEventListener("orientationchange", updateSurfaceSize);
+    window.visualViewport?.addEventListener?.("resize", updateSurfaceSize);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updateSurfaceSize);
+      window.removeEventListener("orientationchange", updateSurfaceSize);
+      window.visualViewport?.removeEventListener?.("resize", updateSurfaceSize);
+    };
+  }, [open]);
+
   if (!open) {
     return null;
   }
 
   return (
-    <BottomSheet
-      open={open}
-      title="全屏签字"
-      ariaLabel="全屏签字"
-      onClose={onClose}
-      className="bottom-sheet-signature-editor"
-      bodyClassName="bottom-sheet-body-signature-editor"
-    >
-      <div className="signature-editor-sheet">
-        <div className="sheet-context-row">
-          <strong>签字人：</strong>
-          <span>{currentName || "-"}</span>
-        </div>
-        <div className="signature-editor-shell">
-          <SignatureCanvas
-            ariaLabel="全屏驾驶员手写签字"
-            className="signature-pad signature-pad-fullscreen"
-            minWidth={640}
-            minHeight={360}
-            onChange={onChange}
-            value={value}
-          />
-        </div>
-        <div className="signature-editor-actions">
-          <button className="ghost-button signature-reset-button" type="button" onClick={onClear}>
-            清空重签
+    <div className="modal-overlay signature-editor-overlay" role="presentation">
+      <section
+        ref={containerRef}
+        aria-label="全屏签字"
+        aria-modal="true"
+        className="signature-editor-dialog"
+        role="dialog"
+      >
+        <header className="signature-editor-header">
+          <div className="signature-editor-title-wrap">
+            <h2>全屏签字</h2>
+            <p>签字人：{currentName || "-"}</p>
+          </div>
+          <button aria-label="关闭全屏签字" className="icon-button signature-editor-close" type="button" onClick={onClose}>
+            <AssetIcon name="close" />
           </button>
-          <button className="primary-button" type="button" onClick={onClose}>
-            完成书写
-          </button>
+        </header>
+        <div className="signature-editor-sheet">
+          <div className="signature-editor-immersive-tip">可横屏书写，签字区域已铺满整个可用屏幕。</div>
+          <div ref={shellRef} className="signature-editor-shell">
+            <SignatureCanvas
+              ariaLabel="全屏驾驶员手写签字"
+              className="signature-pad signature-pad-fullscreen"
+              minHeight={360}
+              onChange={onChange}
+              value={value}
+              viewportHeight={surfaceSize.height}
+              viewportWidth={surfaceSize.width}
+            />
+          </div>
+          <div className="signature-editor-actions">
+            <button className="ghost-button signature-reset-button" type="button" onClick={onClear}>
+              清空重签
+            </button>
+            <button className="primary-button" type="button" onClick={onClose}>
+              完成书写
+            </button>
+          </div>
         </div>
-      </div>
-    </BottomSheet>
+      </section>
+    </div>
   );
 }
 
