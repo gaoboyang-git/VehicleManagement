@@ -312,11 +312,13 @@ async function loadPdfFonts(pdfDoc) {
     try {
       const fontBytes = await readFile(fontPath);
       const regularFont = await pdfDoc.embedFont(fontBytes, { subset: true });
-      const boldFont = await pdfDoc.embedFont(fontBytes, { subset: true });
 
       return {
         regularFont,
-        boldFont,
+        // Reuse the same Unicode-capable font for table headers.
+        // Embedding a second "bold" instance from some system CJK fonts can render
+        // Chinese text as solid blocks in exported PDFs.
+        boldFont: regularFont,
         sanitizeText: (value) => String(value ?? "")
       };
     } catch {
