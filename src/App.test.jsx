@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.jsx";
 
 const NativeURL = globalThis.URL;
+const TEST_SIGNATURE_IMAGE =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg==";
 
 function mockFetch(responseFactory) {
   const fetchMock = vi.fn(responseFactory);
@@ -122,6 +124,7 @@ function mockUserManagementFetch(
       }
       const createdUser = {
         id: `id-${body.username}`,
+        fullName: body.fullName || body.username,
         username: body.username,
         role: body.role,
         isBuiltinAdmin: false
@@ -335,7 +338,7 @@ function mockAdminRecordManagementFetch({
   records = [],
   latestMileageByVehicleId = {},
   exportBlob = new Blob(["fake"], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    type: "application/pdf"
   })
 } = {}) {
   let nextUsers = [...users];
@@ -671,11 +674,13 @@ describe("Issue 2 user management UI", () => {
     expect(passwordInput).toHaveAttribute("type", "password");
 
     await user.type(screen.getByLabelText("新账号"), "new_employee");
+    await user.type(screen.getByLabelText("用户姓名"), "新员工");
     await user.type(screen.getByLabelText("初始密码"), "123");
     await user.selectOptions(screen.getByLabelText("角色"), "employee");
     await user.click(screen.getByRole("button", { name: "提交新增" }));
 
-    expect(await screen.findByText("new_employee")).toBeInTheDocument();
+    expect(await screen.findByText("新员工")).toBeInTheDocument();
+    expect(screen.getByText("账号：new_employee")).toBeInTheDocument();
     expect(screen.getByText("普通员工")).toBeInTheDocument();
   });
 
@@ -716,6 +721,7 @@ describe("Issue 2 user management UI", () => {
     render(<App />);
     await loginAsAdminAndOpenUsers(user);
     await user.click(await screen.findByRole("button", { name: "新增用户" }));
+    await user.type(screen.getByLabelText("用户姓名"), "重复账号");
     await user.type(screen.getByLabelText("新账号"), "employee");
     await user.type(screen.getByLabelText("初始密码"), "Another001");
     await user.selectOptions(screen.getByLabelText("角色"), "employee");
@@ -982,6 +988,7 @@ describe("Issue 4 registry UI", () => {
     const endMileage = screen.getByLabelText("终点公里读数");
 
     expect(startMileage).toHaveValue(null);
+    expect(endMileage).toHaveValue(null);
 
     setDateTimeValue("testid:registry-departure-time", "2026-07-20T09:00");
     setDateTimeValue("testid:registry-return-time", "2026-07-20T10:00");
@@ -989,7 +996,7 @@ describe("Issue 4 registry UI", () => {
     await user.type(screen.getByLabelText("目的地及行车路线"), "园区-政务大厅");
     await user.type(startMileage, "1000");
     await user.type(endMileage, "1200");
-    await user.type(screen.getByLabelText("驾驶员签字"), "张三");
+    expect(screen.getByLabelText("驾驶员手写签字")).toBeInTheDocument();
 
     expect(screen.getByLabelText("行车公里数")).toHaveValue(200);
 
@@ -998,7 +1005,7 @@ describe("Issue 4 registry UI", () => {
     expect(await screen.findByText("登记已提交")).toBeInTheDocument();
     expect(screen.getByLabelText("车辆")).toHaveValue("vehicle-1");
     expect(screen.getByLabelText("起步公里读数")).toHaveValue(1200);
-    expect(screen.getByLabelText("终点公里读数")).toHaveValue(null);
+    expect(screen.getByLabelText("终点公里读数")).toHaveValue(1200);
     expect(screen.getByLabelText("出车时间")).toHaveValue("");
     expect(getRecords()).toHaveLength(1);
     expect(getRecords()[0]).toEqual(
@@ -1041,6 +1048,7 @@ describe("Issue 4 registry UI", () => {
     await loginAsEmployee(user);
 
     expect(await screen.findByLabelText("起步公里读数")).toHaveValue(1000);
+    expect(screen.getByLabelText("终点公里读数")).toHaveValue(1000);
 
     setDateTimeValue("出车时间", "2026-07-20T08:00");
     await user.type(screen.getByLabelText("事由"), "临时办事");
@@ -1051,9 +1059,9 @@ describe("Issue 4 registry UI", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("起步公里读数")).toHaveValue(500);
     });
+    expect(screen.getByLabelText("终点公里读数")).toHaveValue(500);
     expect(screen.getByLabelText("出车时间")).toHaveValue("");
     expect(screen.getByLabelText("事由")).toHaveValue("");
-    expect(screen.getByLabelText("终点公里读数")).toHaveValue(null);
   });
 
   it("calculates distance from the current start mileage and blocks smaller end mileage", async () => {
@@ -1092,7 +1100,7 @@ describe("Issue 4 registry UI", () => {
     setDateTimeValue("还车时间", "2026-07-20T10:00");
     await user.type(screen.getByLabelText("事由"), "外出办事");
     await user.type(screen.getByLabelText("目的地及行车路线"), "园区-政务大厅");
-    await user.type(screen.getByLabelText("驾驶员签字"), "张三");
+    expect(screen.getByLabelText("驾驶员手写签字")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "提交登记" }));
 
     expect((await screen.findAllByText("终点公里不能小于起步公里")).length).toBeGreaterThan(0);
@@ -1131,7 +1139,7 @@ describe("Issue 4 registry UI", () => {
     await user.type(screen.getByLabelText("事由"), "夜间值班");
     await user.type(screen.getByLabelText("目的地及行车路线"), "园区-值班点");
     await user.type(screen.getByLabelText("终点公里读数"), "1100");
-    await user.type(screen.getByLabelText("驾驶员签字"), "李四");
+    expect(screen.getByLabelText("驾驶员手写签字")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "提交登记" }));
 
     expect(await screen.findByText("车辆不存在或已失效")).toBeInTheDocument();
@@ -1170,7 +1178,7 @@ describe("Issue 4 registry UI", () => {
     await user.type(screen.getByLabelText("事由"), "调度");
     await user.type(screen.getByLabelText("目的地及行车路线"), "园区-政务大厅");
     await user.type(screen.getByLabelText("终点公里读数"), "1100");
-    await user.type(screen.getByLabelText("驾驶员签字"), "张三");
+    expect(screen.getByLabelText("驾驶员手写签字")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "提交登记" }));
 
     expect(await screen.findByText("登记已提交")).toBeInTheDocument();
@@ -1205,7 +1213,7 @@ describe("Issue 4 registry UI", () => {
     await user.type(screen.getByLabelText("事由"), "调度");
     await user.type(screen.getByLabelText("目的地及行车路线"), "园区-政务大厅");
     await user.type(screen.getByLabelText("终点公里读数"), "1100");
-    await user.type(screen.getByLabelText("驾驶员签字"), "张三");
+    expect(screen.getByLabelText("驾驶员手写签字")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "提交登记" }));
 
     expect((await screen.findAllByText("还车时间不能小于出车时间")).length).toBeGreaterThan(0);
@@ -1243,6 +1251,7 @@ describe("Issue 4 registry UI", () => {
 
     expect(fuelFeeInput).toHaveAttribute("type", "number");
     expect(fuelVolumeInput).toHaveAttribute("type", "number");
+    expect(screen.queryByRole("button", { name: "修改姓名" })).not.toBeInTheDocument();
 
     await user.type(fuelFeeInput, "15.5");
     await user.type(fuelVolumeInput, "20.3");
@@ -1360,6 +1369,61 @@ describe("Issue 5 record management UI", () => {
     expect(within(recordSection).getByText("2026-07-20 09:00-2026-07-20 10:00 · 100 公里")).toBeInTheDocument();
     expect(within(recordSection).getByRole("button", { name: "删除记录 REC-001" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /编辑/ })).not.toBeInTheDocument();
+  });
+
+  it("opens a larger signature preview from the record detail panel and closes it", async () => {
+    mockAdminRecordManagementFetch({
+      users: [{ id: "admin-id", username: "admin", role: "admin", isBuiltinAdmin: true }],
+      vehicles: [
+        {
+          id: "vehicle-1",
+          vehicleCode: "CAR-001",
+          plateNumber: "沪A-10001",
+          brandModel: "大众帕萨特",
+          isDeleted: false
+        }
+      ],
+      records: [
+        {
+          id: "record-signature",
+          vehicleId: "vehicle-1",
+          vehicleCode: "CAR-001",
+          plateNumber: "沪A-10001",
+          brandModel: "大众帕萨特",
+          registrantUsername: "admin",
+          registrantName: "王麻子",
+          businessDate: "2026-07-20",
+          departureTime: "2026-07-20T09:00",
+          returnTime: "2026-07-20T10:00",
+          startMileage: 1000,
+          endMileage: 1100,
+          distance: 100,
+          fuelFee: "15",
+          fuelVolume: "20",
+          driverSignature: "王麻子",
+          driverSignatureImage: TEST_SIGNATURE_IMAGE,
+          remark: "",
+          reason: "签字预览",
+          route: "园区-政务大厅",
+          isCrossDay: false,
+          createdAt: "2026-07-20T10:00:00.000Z"
+        }
+      ]
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+    await loginAsAdminAndOpenRecords(user);
+
+    const recordSection = await screen.findByRole("region", { name: "用车记录管理" });
+    await user.click(within(recordSection).getByRole("button", { name: "查看记录 签字预览" }));
+    await user.click(screen.getByRole("button", { name: "放大查看王麻子的手写签字" }));
+
+    expect(screen.getByRole("dialog", { name: "王麻子的手写签字" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭王麻子的手写签字" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "王麻子的手写签字" })).not.toBeInTheDocument();
+    });
   });
 
   it("formats legacy time-only records with full business dates in the expanded detail", async () => {
@@ -1724,7 +1788,7 @@ describe("Issue 5 record management UI", () => {
     expect(screen.queryByText("OTHER")).not.toBeInTheDocument();
   });
 
-  it("downloads an xlsx file using the current record filters", async () => {
+  it("downloads a pdf file using the current record filters", async () => {
     const fetchMock = mockAdminRecordManagementFetch({
       users: [{ id: "admin-id", username: "admin", role: "admin", isBuiltinAdmin: true }],
       records: [
@@ -1768,9 +1832,9 @@ describe("Issue 5 record management UI", () => {
     fireEvent.change(screen.getByLabelText("按日期筛选"), {
       target: { value: "2026-07-20" }
     });
-    await user.click(await screen.findByRole("button", { name: "导出 Excel" }));
+    await user.click(await screen.findByRole("button", { name: "导出 PDF" }));
 
-    const exportBanner = await screen.findByText("Excel 已导出");
+    const exportBanner = await screen.findByText("PDF 已导出");
     expect(exportBanner).toHaveClass("banner-message", "banner-message-success");
     expect(
       fetchMock.mock.calls.some(
@@ -1781,7 +1845,7 @@ describe("Issue 5 record management UI", () => {
     ).toBe(true);
     expect(createObjectUrlSpy).toHaveBeenCalledTimes(1);
     expect(clickSpy).toHaveBeenCalledTimes(1);
-    expect(clickSpy.mock.instances[0].download).toMatch(/^用车记录-\d{4}年\d{2}月\d{2}日\.xlsx$/);
+    expect(clickSpy.mock.instances[0].download).toMatch(/^用车记录-\d{4}年\d{2}月\d{2}日\.pdf$/);
     expect(revokeObjectUrlSpy).toHaveBeenCalledWith("blob:records");
   });
 });

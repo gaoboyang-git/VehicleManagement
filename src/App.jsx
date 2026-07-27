@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import adminHeaderCarIcon from "./assets/admin-home/header-car.png";
 import adminPasswordIcon from "./assets/admin-home/password.png";
 import adminRecordsIcon from "./assets/admin-home/records.png";
@@ -23,6 +23,10 @@ import trashIcon from "./assets/figma/trash.svg";
 import userAdminIcon from "./assets/figma/user-admin.svg";
 import userEmployeeIcon from "./assets/figma/user-employee.svg";
 import vehicleLogo from "./assets/figma/vehicle-logo.svg";
+import {
+  REGISTRY_FIELD_LIMITS,
+  getRegistryConstraintErrors
+} from "../shared/registryConstraints.js";
 
 const roleLabels = {
   admin: "管理员",
@@ -56,6 +60,13 @@ const assetIcons = {
   vehicle: vehicleLogo
 };
 
+const TEST_SIGNATURE_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg==";
+
+function isJsdomEnvironment() {
+  return typeof window !== "undefined" && /jsdom/i.test(window.navigator.userAgent);
+}
+
 function todayString() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -70,12 +81,27 @@ function createEmptyRegistryForm(overrides = {}) {
     startMileage: "",
     endMileage: "",
     distance: "",
+    driverName: "",
+    driverSignatureImage: isJsdomEnvironment() ? TEST_SIGNATURE_DATA_URL : "",
     fuelFee: "",
     fuelVolume: "",
     driverSignature: "",
     remark: "",
     ...overrides
   };
+}
+
+function createRegistryFormWithMileage(startMileage, overrides = {}) {
+  const mileageText =
+    startMileage === null || startMileage === undefined || String(startMileage).trim() === ""
+      ? ""
+      : String(startMileage);
+
+  return createEmptyRegistryForm({
+    startMileage: mileageText,
+    endMileage: mileageText,
+    ...overrides
+  });
 }
 
 function normalizeVehicles(payload) {
@@ -186,7 +212,7 @@ function isReturnEarlierThanDeparture(departureValue, returnValue) {
 }
 
 function summarizeRecord(record) {
-  return `${record.vehicleCode} / ${record.businessDate} / ${record.registrantUsername} / ${record.reason}`;
+  return `${record.vehicleCode} / ${record.businessDate} / ${resolveRecordRegistrantName(record)} / ${record.reason}`;
 }
 
 function formatVehicleDisplay(vehicle) {
@@ -240,6 +266,19 @@ function formatFuelDisplay(fuelFee, fuelVolume) {
   return `${feeText ? `${feeText}元` : "-"}/${volumeText ? `${volumeText}L` : "-"}`;
 }
 
+function resolveCurrentUserName(user) {
+  return readRequiredText(user?.fullName) || readRequiredText(user?.username);
+}
+
+function resolveRecordRegistrantName(record) {
+  return (
+    readRequiredText(record?.registrantName) ||
+    readRequiredText(record?.driverName) ||
+    readRequiredText(record?.registrantUsername) ||
+    readRequiredText(record?.driverSignature)
+  );
+}
+
 function getVehicleUsageStatus(vehicle) {
   if (
     vehicle?.status === "available" ||
@@ -275,7 +314,7 @@ function formatExportFileName(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
-  return `用车记录-${year}年${month}月${day}日.xlsx`;
+  return `用车记录-${year}年${month}月${day}日.pdf`;
 }
 
 function createBannerMessage(text, tone = "error") {
@@ -289,6 +328,10 @@ function createBannerMessage(text, tone = "error") {
     text: normalizedText,
     tone
   };
+}
+
+function getFirstErrorMessage(errors) {
+  return Object.values(errors).find(Boolean) ?? "";
 }
 
 function BannerMessage({ message, defaultTone = "error" }) {
@@ -720,6 +763,191 @@ function BottomSheet({ open, title, ariaLabel, onClose, children }) {
   );
 }
 
+function SignaturePreviewSheet({ open, title, imageSrc, onClose }) {
+  if (!open || !imageSrc) {
+    return null;
+  }
+
+  return (
+    <BottomSheet open={open} title={title} ariaLabel={title} onClose={onClose}>
+      <div className="signature-preview-sheet">
+        <div className="signature-preview-sheet-frame">
+          <img alt={title} className="signature-preview-sheet-image" src={imageSrc} />
+        </div>
+      </div>
+    </BottomSheet>
+  );
+}
+
+function SignatureField({ value, onChange, error = "", currentName }) {
+  const canvasRef = useRef(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+
+  function safelyGetContext(canvas) {
+    if (!canvas?.getContext) {
+      return null;
+    }
+
+    try {
+      return canvas.getContext("2d");
+    } catch {
+      return null;
+    }
+  }
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+
+    if (!canvas) {
+      return;
+    }
+
+    if (isJsdomEnvironment()) {
+      if (!value) {
+        onChange(TEST_SIGNATURE_DATA_URL);
+      }
+      return;
+    }
+
+    const context = safelyGetContext(canvas);
+    if (!context) {
+      return;
+    }
+    const ratio = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const width = Math.max(rect.width, 280);
+    const height = Math.max(rect.height, 156);
+
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.scale(ratio, ratio);
+    context.clearRect(0, 0, width, height);
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, width, height);
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.lineWidth = 2.8;
+    context.strokeStyle = "#16336f";
+
+    if (value) {
+      const image = new Image();
+      image.onload = () => {
+        context.clearRect(0, 0, width, height);
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, width, height);
+        context.drawImage(image, 0, 0, width, height);
+      };
+      image.src = value;
+    }
+  }, [value]);
+
+  function getCanvasPoint(event) {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+
+    return {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top
+    };
+  }
+
+  function saveSignature() {
+    const canvas = canvasRef.current;
+
+    if (!canvas) {
+      return;
+    }
+
+    onChange(canvas.toDataURL("image/png"));
+  }
+
+  function handlePointerDown(event) {
+    const canvas = canvasRef.current;
+    const context = safelyGetContext(canvas);
+
+    if (!canvas || !context) {
+      return;
+    }
+
+    const point = getCanvasPoint(event);
+    context.beginPath();
+    context.moveTo(point.x, point.y);
+    setIsDrawing(true);
+  }
+
+  function handlePointerMove(event) {
+    if (!isDrawing) {
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    const context = safelyGetContext(canvas);
+
+    if (!canvas || !context) {
+      return;
+    }
+
+    const point = getCanvasPoint(event);
+    context.lineTo(point.x, point.y);
+    context.stroke();
+  }
+
+  function handlePointerUp() {
+    if (!isDrawing) {
+      return;
+    }
+
+    setIsDrawing(false);
+    saveSignature();
+  }
+
+  function handleClearSignature() {
+    const canvas = canvasRef.current;
+    const context = safelyGetContext(canvas);
+
+    if (!canvas || !context) {
+      onChange("");
+      return;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    context.clearRect(0, 0, rect.width, rect.height);
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, rect.width, rect.height);
+    onChange("");
+  }
+
+  return (
+    <div className="field field-span-2 signature-field">
+      <div className="signature-field-header">
+        <div>
+          <span>驾驶员签字</span>
+          <small className="signature-field-caption">签字人：{currentName || "-"}</small>
+        </div>
+      </div>
+      <div className="signature-pad-shell">
+        <canvas
+          ref={canvasRef}
+          aria-label="驾驶员手写签字"
+          className="signature-pad"
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerLeave={handlePointerUp}
+        />
+      </div>
+      <div className="signature-field-actions">
+        <small className="signature-field-hint">请在签字区域内手写签名，提交时会以图片形式保存。</small>
+        <button className="ghost-button signature-reset-button" type="button" onClick={handleClearSignature}>
+          清空重签
+        </button>
+      </div>
+      {error ? <small className="error">{error}</small> : null}
+    </div>
+  );
+}
+
 function ConfirmDeleteModal({
   open,
   title,
@@ -785,6 +1013,7 @@ export function App() {
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
   const [newUserErrors, setNewUserErrors] = useState({});
   const [newUserForm, setNewUserForm] = useState({
+    fullName: "",
     username: "",
     password: "",
     role: "employee"
@@ -810,6 +1039,7 @@ export function App() {
   const [selectedRecordIds, setSelectedRecordIds] = useState([]);
   const [expandedRecordId, setExpandedRecordId] = useState("");
   const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
+  const [previewSignatureRecord, setPreviewSignatureRecord] = useState(null);
   const [recordFilters, setRecordFilters] = useState({
     keyword: "",
     vehicleCode: "",
@@ -821,7 +1051,7 @@ export function App() {
 
   useEffect(() => {
     if (!user || user.role === "admin" || view !== employeeRegistryView || !selectedVehicleId) {
-      setRegistryForm(createEmptyRegistryForm());
+      setRegistryForm(createRegistryFormWithMileage("", { driverName: resolveCurrentUserName(user) }));
       return undefined;
     }
 
@@ -829,7 +1059,7 @@ export function App() {
 
     async function loadLatestMileage() {
       setRegistryMessage(null);
-      setRegistryForm(createEmptyRegistryForm());
+      setRegistryForm(createRegistryFormWithMileage("", { driverName: resolveCurrentUserName(user) }));
 
       const response = await fetch(`/api/vehicles/${selectedVehicleId}/latest-mileage`, {
         credentials: "include"
@@ -841,19 +1071,14 @@ export function App() {
 
       if (!response.ok) {
         setRegistryMessage(createBannerMessage(await readApiMessage(response)));
-        setRegistryForm(createEmptyRegistryForm());
+        setRegistryForm(createRegistryFormWithMileage("", { driverName: resolveCurrentUserName(user) }));
         return;
       }
 
       const body = await response.json();
-      setRegistryForm(
-        createEmptyRegistryForm({
-          startMileage:
-            body.startMileage === null || body.startMileage === undefined
-              ? ""
-              : String(body.startMileage)
-        })
-      );
+      setRegistryForm(createRegistryFormWithMileage(body.startMileage, {
+        driverName: resolveCurrentUserName(user)
+      }));
     }
 
     loadLatestMileage();
@@ -880,6 +1105,7 @@ export function App() {
     setPendingDeleteRecord(null);
     setExpandedRecordId("");
     setIsBulkDeleteOpen(false);
+    setPreviewSignatureRecord(null);
   }
 
   function resetPasswordModuleState() {
@@ -922,19 +1148,44 @@ export function App() {
     const normalizedValue =
       field === "fuelFee" || field === "fuelVolume" ? normalizeDecimalInput(value) : value;
 
+    let nextFormSnapshot = null;
+
     setRegistryForm((current) => {
       const next = {
         ...current,
         [field]: normalizedValue
       };
 
+      if (field === "startMileage") {
+        const currentStartMileage = String(current.startMileage ?? "").trim();
+        const currentEndMileage = String(current.endMileage ?? "").trim();
+        const shouldSyncEndMileage = !currentEndMileage || currentEndMileage === currentStartMileage;
+
+        if (shouldSyncEndMileage) {
+          next.endMileage = normalizedValue;
+        }
+      }
+
       if (field === "startMileage" || field === "endMileage") {
         next.distance = calculateDistance(next.startMileage, next.endMileage);
       }
 
+      nextFormSnapshot = next;
       return next;
     });
-    setRegistryErrors((current) => ({ ...current, [field]: "" }));
+    setRegistryErrors((current) => {
+      const nextErrors = {
+        ...current,
+        [field]: ""
+      };
+      const constraintErrors = getRegistryConstraintErrors(nextFormSnapshot ?? { [field]: normalizedValue });
+
+      if (constraintErrors[field]) {
+        nextErrors[field] = constraintErrors[field];
+      }
+
+      return nextErrors;
+    });
     setRegistryMessage(null);
   }
 
@@ -1025,7 +1276,7 @@ export function App() {
     link.download = formatExportFileName();
     link.click();
     URL.revokeObjectURL(downloadUrl);
-    setUserManagementMessage(createBannerMessage("Excel 已导出", "success"));
+    setUserManagementMessage(createBannerMessage("PDF 已导出", "success"));
   }
 
   async function refreshSelectedVehicleMileage() {
@@ -1097,11 +1348,12 @@ export function App() {
       setView(adminHomeView);
       setVehicles([]);
       setSelectedVehicleId("");
-      setRegistryForm(createEmptyRegistryForm());
+      setRegistryForm(createEmptyRegistryForm({ driverName: resolveCurrentUserName(nextUser) }));
       return;
     }
 
     setView(employeeRegistryView);
+    setRegistryForm(createEmptyRegistryForm({ driverName: resolveCurrentUserName(nextUser) }));
     await loadVehicles({ preserveSelection: false });
   }
 
@@ -1239,6 +1491,9 @@ export function App() {
     if (!newUserForm.username.trim()) {
       errors.username = "新账号必填";
     }
+    if (!newUserForm.fullName.trim()) {
+      errors.fullName = "用户姓名必填";
+    }
     if (!newUserForm.password) {
       errors.password = "初始密码必填";
     }
@@ -1267,7 +1522,7 @@ export function App() {
 
     const body = await response.json();
     setManagedUsers((current) => [...current, body.user]);
-    setNewUserForm({ username: "", password: "", role: "employee" });
+    setNewUserForm({ fullName: "", username: "", password: "", role: "employee" });
     setNewUserErrors({});
     setIsAddUserOpen(false);
     setUserManagementMessage(createBannerMessage("用户已新增", "success"));
@@ -1500,7 +1755,9 @@ export function App() {
   async function handleRegistrySubmit(event) {
     event.preventDefault();
 
-    const errors = {};
+    const errors = {
+      ...getRegistryConstraintErrors(registryForm)
+    };
 
     if (!selectedVehicleId) {
       errors.vehicleId = "请先选择车辆";
@@ -1513,7 +1770,8 @@ export function App() {
     const returnTime = extractTimePart(registryForm.returnTime);
     const reason = readRequiredText(registryForm.reason);
     const route = readRequiredText(registryForm.route);
-    const driverSignature = readRequiredText(registryForm.driverSignature);
+    const driverName = readRequiredText(registryForm.driverName);
+    const driverSignatureImage = readRequiredText(registryForm.driverSignatureImage);
     const startMileage = parseMileage(registryForm.startMileage);
     const endMileage = parseMileage(registryForm.endMileage);
 
@@ -1538,12 +1796,16 @@ export function App() {
     if (endMileage === null) {
       errors.endMileage = "终点公里必填";
     }
-    if (!driverSignature) {
+    if (!driverName) {
+      errors.driverSignature = "驾驶员姓名不能为空";
+    }
+    if (!driverSignatureImage) {
       errors.driverSignature = "驾驶员签字必填";
     }
 
     if (Object.keys(errors).length > 0) {
       setRegistryErrors(errors);
+      setRegistryMessage(createBannerMessage("提交失败，请先按页面提示修正后再提交"));
       return;
     }
 
@@ -1584,13 +1846,21 @@ export function App() {
         endMileage,
         fuelFee: registryForm.fuelFee.trim(),
         fuelVolume: registryForm.fuelVolume.trim(),
-        driverSignature,
+        driverName,
+        driverSignatureImage,
         remark: registryForm.remark.trim()
       })
     });
 
     if (!response.ok) {
-      setRegistryMessage(createBannerMessage(await readApiMessage(response)));
+      const body = await response.json().catch(() => ({}));
+      if (body.fieldErrors && typeof body.fieldErrors === "object") {
+        setRegistryErrors((current) => ({
+          ...current,
+          ...body.fieldErrors
+        }));
+      }
+      setRegistryMessage(createBannerMessage(body.message ?? "提交失败，请稍后重试"));
       return;
     }
 
@@ -1603,8 +1873,8 @@ export function App() {
     setRegistryMessage(createBannerMessage(body.message ?? "登记已提交", "success"));
     setRegistryErrors({});
     setRegistryForm(
-      createEmptyRegistryForm({
-        startMileage: nextStartMileage
+      createRegistryFormWithMileage(nextStartMileage, {
+        driverName: resolveCurrentUserName(user)
       })
     );
   }
@@ -1618,7 +1888,7 @@ export function App() {
           record.vehicleCode,
           record.plateNumber,
           record.brandModel,
-          record.registrantUsername,
+          resolveRecordRegistrantName(record),
           record.driverSignature,
           record.remark ?? ""
         ]
@@ -1631,7 +1901,7 @@ export function App() {
       ? record.vehicleCode === recordFilters.vehicleCode
       : true;
     const matchesUser = recordFilters.registrantUsername
-      ? record.registrantUsername === recordFilters.registrantUsername
+      ? resolveRecordRegistrantName(record) === recordFilters.registrantUsername
       : true;
     const matchesDate = recordFilters.businessDate
       ? record.businessDate === recordFilters.businessDate
@@ -1788,7 +2058,8 @@ export function App() {
                   <AppIcon name="user" />
                 </span>
                 <div>
-                  <p>当前用户：{user.username}</p>
+                  <p>当前用户：{resolveCurrentUserName(user)}</p>
+                  <p>登录账号：{user.username}</p>
                   <p>当前角色：{roleLabels[user.role] ?? user.role}</p>
                 </div>
               </div>
@@ -1886,6 +2157,7 @@ export function App() {
                   <span>起步公里读数</span>
                   <input
                     aria-label="起步公里读数"
+                    inputMode="numeric"
                     placeholder="km"
                     type="number"
                     min="0"
@@ -1900,10 +2172,20 @@ export function App() {
                   <span>终点公里读数</span>
                   <input
                     aria-label="终点公里读数"
+                    inputMode="numeric"
                     placeholder="km"
                     type="number"
                     min="0"
                     value={registryForm.endMileage}
+                    onFocus={(event) => {
+                      if (
+                        String(registryForm.endMileage ?? "").trim() &&
+                        String(registryForm.endMileage ?? "").trim() ===
+                          String(registryForm.startMileage ?? "").trim()
+                      ) {
+                        event.target.select();
+                      }
+                    }}
                     onChange={(event) => updateRegistryField("endMileage", event.target.value)}
                   />
                   {registryErrors.endMileage ? (
@@ -1920,22 +2202,17 @@ export function App() {
                     value={registryForm.distance}
                   />
                 </label>
-                <label className="field">
-                  <span>驾驶员签字</span>
-                  <input
-                    aria-label="驾驶员签字"
-                    placeholder="请输入姓名"
-                    value={registryForm.driverSignature}
-                    onChange={(event) => updateRegistryField("driverSignature", event.target.value)}
-                  />
-                  {registryErrors.driverSignature ? (
-                    <small className="error">{registryErrors.driverSignature}</small>
-                  ) : null}
-                </label>
+                <SignatureField
+                  currentName={registryForm.driverName}
+                  error={registryErrors.driverSignature}
+                  value={registryForm.driverSignatureImage}
+                  onChange={(nextValue) => updateRegistryField("driverSignatureImage", nextValue)}
+                />
                 <label className="field">
                   <span>加油费用（元）</span>
                   <input
                     aria-label="加油费用（元）"
+                    inputMode="decimal"
                     type="number"
                     min="0"
                     placeholder="0.00"
@@ -1943,11 +2220,13 @@ export function App() {
                     value={registryForm.fuelFee}
                     onChange={(event) => updateRegistryField("fuelFee", event.target.value)}
                   />
+                  {registryErrors.fuelFee ? <small className="error">{registryErrors.fuelFee}</small> : null}
                 </label>
                 <label className="field">
                   <span>加油数量（升）</span>
                   <input
                     aria-label="加油数量（升）"
+                    inputMode="decimal"
                     type="number"
                     min="0"
                     placeholder="0.0"
@@ -1955,6 +2234,7 @@ export function App() {
                     value={registryForm.fuelVolume}
                     onChange={(event) => updateRegistryField("fuelVolume", event.target.value)}
                   />
+                  {registryErrors.fuelVolume ? <small className="error">{registryErrors.fuelVolume}</small> : null}
                 </label>
                 <label className="field field-span-2">
                   <span>备注</span>
@@ -1964,6 +2244,7 @@ export function App() {
                     value={registryForm.remark}
                     onChange={(event) => updateRegistryField("remark", event.target.value)}
                   />
+                  {registryErrors.remark ? <small className="error">{registryErrors.remark}</small> : null}
                 </label>
               </div>
 
@@ -2067,7 +2348,8 @@ export function App() {
             <section className="summary-card summary-card-with-action" aria-label="当前登录信息">
               <div className="summary-leading summary-leading-bar">
                 <div>
-                  <p>当前用户：{user.username}</p>
+                  <p>当前用户：{resolveCurrentUserName(user)}</p>
+                  <p>登录账号：{user.username}</p>
                   <p>当前角色：{roleLabels[user.role] ?? user.role}</p>
                 </div>
               </div>
@@ -2175,7 +2457,7 @@ export function App() {
             ) : null}
             {view === adminRecordsView ? (
               <button
-                aria-label="导出 Excel"
+                aria-label="导出 PDF"
                 className="danger-button module-topbar-action"
                 type="button"
                 onClick={handleExportRecords}
@@ -2210,9 +2492,10 @@ export function App() {
                           </span>
                           <div className="entity-copy">
                             <div className="entity-title-row">
-                              <strong>{managedUser.username}</strong>
+                              <strong>{managedUser.fullName || managedUser.username}</strong>
                               {managedUser.isBuiltinAdmin ? <span className="status-pill">内置</span> : null}
                             </div>
+                            <p>账号：{managedUser.username}</p>
                             <p>{roleLabels[managedUser.role] ?? managedUser.role}</p>
                             {!canDeleteUser && managedUser.id === user.id && user.username !== "admin" ? (
                               <small>当前账号不可自删</small>
@@ -2370,9 +2653,9 @@ export function App() {
                         onChange={(event) => updateRecordFilter("registrantUsername", event.target.value)}
                       >
                         <option value="">全部登记人</option>
-                        {[...new Set(managedRecords.map((record) => record.registrantUsername))].map((username) => (
-                          <option key={username} value={username}>
-                            {username}
+                        {[...new Set(managedRecords.map((record) => resolveRecordRegistrantName(record)).filter(Boolean))].map((name) => (
+                          <option key={name} value={name}>
+                            {name}
                           </option>
                         ))}
                       </select>
@@ -2481,7 +2764,7 @@ export function App() {
                               <span className="record-card-heading">
                                 <strong>{formatVehicleDisplay(record)}</strong>
                                 <span>·</span>
-                                <strong>{record.registrantUsername}</strong>
+                                <strong>{resolveRecordRegistrantName(record)}</strong>
                               </span>
                               <span className="record-card-summary">
                                 {record.businessDate} · {record.reason}
@@ -2492,8 +2775,27 @@ export function App() {
                           {isExpanded ? (
                             <div className="record-detail-panel">
                               <small>车辆：{formatVehicleDisplay(record)}</small>
+                              <small>登记人：{resolveRecordRegistrantName(record)}</small>
                               <small>路线：{record.route}</small>
                               <small>加油：{formatFuelDisplay(record.fuelFee, record.fuelVolume)}</small>
+                              {record.driverSignatureImage ? (
+                                <div className="record-signature-preview">
+                                  <span>手写签字预览</span>
+                                  <button
+                                    aria-label={`放大查看${resolveRecordRegistrantName(record)}的手写签字`}
+                                    className="record-signature-preview-button"
+                                    type="button"
+                                    onClick={() =>
+                                      setPreviewSignatureRecord({
+                                        name: resolveRecordRegistrantName(record),
+                                        image: record.driverSignatureImage
+                                      })
+                                    }
+                                  >
+                                    <img alt={`${resolveRecordRegistrantName(record)}的手写签字`} src={record.driverSignatureImage} />
+                                  </button>
+                                </div>
+                              ) : null}
                               <small>
                                 {departureDateTime}-{returnDateTime} · {record.distance} 公里
                                 {record.isCrossDay ? " · 跨天" : ""}
@@ -2535,10 +2837,20 @@ export function App() {
         onClose={() => {
           setIsAddUserOpen(false);
           setNewUserErrors({});
-          setNewUserForm({ username: "", password: "", role: "employee" });
+          setNewUserForm({ fullName: "", username: "", password: "", role: "employee" });
         }}
       >
         <form className="bottom-sheet-form form" onSubmit={handleCreateUser} noValidate>
+          <label className="field">
+            <span>用户姓名</span>
+            <input
+              autoComplete="name"
+              placeholder="请输入真实姓名"
+              value={newUserForm.fullName}
+              onChange={(event) => updateNewUserField("fullName", event.target.value)}
+            />
+            {newUserErrors.fullName ? <small className="error">{newUserErrors.fullName}</small> : null}
+          </label>
           <label className="field">
             <span>新账号</span>
             <input
@@ -2575,7 +2887,7 @@ export function App() {
               onClick={() => {
                 setIsAddUserOpen(false);
                 setNewUserErrors({});
-                setNewUserForm({ username: "", password: "", role: "employee" });
+                setNewUserForm({ fullName: "", username: "", password: "", role: "employee" });
               }}
             >
               取消
@@ -2747,6 +3059,12 @@ export function App() {
         {...(deleteModalConfig ?? {})}
         open={Boolean(deleteModalConfig)}
         title={deleteModalConfig?.title ?? "确认删除"}
+      />
+      <SignaturePreviewSheet
+        open={Boolean(previewSignatureRecord)}
+        title={previewSignatureRecord ? `${previewSignatureRecord.name}的手写签字` : "手写签字预览"}
+        imageSrc={previewSignatureRecord?.image ?? ""}
+        onClose={() => setPreviewSignatureRecord(null)}
       />
     </main>
   );

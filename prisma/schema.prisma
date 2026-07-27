@@ -10,6 +10,7 @@ datasource db {
 model User {
   id             String   @id @default(cuid())
   username       String   @unique
+  fullName       String   @default("")
   passwordHash   String
   role           String
   isBuiltinAdmin Boolean  @default(false)
@@ -44,7 +45,9 @@ model VehicleUseRecord {
   isCrossDay      Boolean  @default(false)
   fuelFee         String?
   fuelVolume      String?
+  driverName      String   @default("")
   driverSignature String
+  driverSignatureImage String?
   remark          String?
   createdAt       DateTime @default(now())
   vehicle         Vehicle  @relation(fields: [vehicleId], references: [id])

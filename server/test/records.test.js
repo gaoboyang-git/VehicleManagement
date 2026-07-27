@@ -5,8 +5,8 @@ import path from "node:path";
 
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { PDFDocument } from "pdf-lib";
 import request from "supertest";
-import XLSX from "xlsx";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createApp, createSessionStore } from "../src/app.js";
@@ -103,6 +103,11 @@ async function createRecord(
   return prisma.vehicleUseRecord.create({
     data
   });
+}
+
+async function readPdfPageCount(buffer) {
+  const pdf = await PDFDocument.load(buffer);
+  return pdf.getPageCount();
 }
 
 describe("Issue 4 registry API", () => {
@@ -609,6 +614,70 @@ describe("Issue 4 registry API", () => {
     expect(invalidNegative.body).toEqual({ message: "加油费用和加油数量必须为非负数字" });
   });
 
+  it("rejects registry fields that exceed the export-safe text limits", async () => {
+    const vehicle = await createVehicle(prisma, {
+      vehicleCode: "CAR-001",
+      plateNumber: "沪A-10001",
+      brandModel: "大众帕萨特"
+    });
+    const agent = await employeeAgent();
+
+    const response = await agent.post("/api/records").send({
+      vehicleId: vehicle.id,
+      businessDate: "2026-07-20",
+      departureTime: "09:00",
+      returnTime: "10:00",
+      reason: "超".repeat(19),
+      route: "路".repeat(65),
+      startMileage: 1000,
+      endMileage: 1100,
+      driverSignature: "张三",
+      remark: "备".repeat(13)
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toBe("事由最多可填写18个字，请精简后再提交");
+    expect(response.body.fieldErrors).toMatchObject({
+      reason: "事由最多可填写18个字，请精简后再提交",
+      route: "目的地及行车路线最多可填写64个字，请精简后再提交",
+      remark: "备注最多可填写12个字，请精简后再提交"
+    });
+    expect(await prisma.vehicleUseRecord.count()).toBe(0);
+  });
+
+  it("rejects registry numeric fields that exceed the export-safe length limits", async () => {
+    const vehicle = await createVehicle(prisma, {
+      vehicleCode: "CAR-001",
+      plateNumber: "沪A-10001",
+      brandModel: "大众帕萨特"
+    });
+    const agent = await employeeAgent();
+
+    const response = await agent.post("/api/records").send({
+      vehicleId: vehicle.id,
+      businessDate: "2026-07-20",
+      departureTime: "09:00",
+      returnTime: "10:00",
+      reason: "外出办事",
+      route: "园区-政务大厅",
+      startMileage: "123456789",
+      endMileage: "123456789",
+      driverSignature: "张三",
+      fuelFee: "12345.678",
+      fuelVolume: "12345.678"
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toBe("起步公里读数最多支持8位数字，请检查后再提交");
+    expect(response.body.fieldErrors).toMatchObject({
+      startMileage: "起步公里读数最多支持8位数字，请检查后再提交",
+      endMileage: "终点公里读数最多支持8位数字，请检查后再提交",
+      fuelFee: "加油费用最多可填写8个字符（含小数点），请检查后再提交",
+      fuelVolume: "加油数量最多可填写8个字符（含小数点），请检查后再提交"
+    });
+    expect(await prisma.vehicleUseRecord.count()).toBe(0);
+  });
+
   it("rejects a stale submit when the selected vehicle has been deleted", async () => {
     const vehicle = await createVehicle(prisma, {
       vehicleCode: "CAR-001",
@@ -938,7 +1007,7 @@ describe("Issue 4 registry API", () => {
     expect(listResponse.body.records.map((record) => record.reason)).toEqual(["KEEP-OLD"]);
   });
 
-  it("exports all effective records to xlsx for an administrator", async () => {
+  it("exports all effective records to pdf for an administrator", async () => {
     const employee = await prisma.user.findUnique({
       where: {
         username: "employee"
@@ -1046,60 +1115,14 @@ describe("Issue 4 registry API", () => {
 
     const agent = await adminAgent();
     const response = await getBinaryResponse(agent, "/api/records/export");
-    const workbook = XLSX.read(response.body, { type: "buffer" });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+    const pageCount = await readPdfPageCount(response.body);
 
     expect(response.status).toBe(200);
-    expect(response.headers["content-type"]).toContain(
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    );
+    expect(response.headers["content-type"]).toContain("application/pdf");
     expect(response.headers["content-disposition"]).toContain("attachment");
-    expect(rows[0]).toEqual([
-      "车牌号",
-      "日期",
-      "出车时间",
-      "还车时间",
-      "事由",
-      "目的地及行车路线",
-      "起步公里读数",
-      "终点公里读数",
-      "行车公里数",
-      "加油费用/数量",
-      "驾驶员签字",
-      "备注"
-    ]);
-    expect(rows.slice(1).map((row) => row[0])).toEqual([
-      "沪A-10003",
-      "沪A-10002",
-      "沪A-10001",
-      "沪A-10001"
-    ]);
-    expect(rows.slice(1).map((row) => row[1])).toEqual([
-      "2026-07-20",
-      "2026-07-20",
-      "2026-07-20",
-      "2026-07-19"
-    ]);
-    expect(rows.slice(1).map((row) => row[4])).toEqual([
-      "REC-C",
-      "REC-B",
-      "REC-A-NEW",
-      "REC-A-OLD"
-    ]);
-    expect(rows.slice(1).map((row) => row[2])).toEqual([
-      "2026-07-20 15:00",
-      "2026-07-20 13:00",
-      "2026-07-20 09:00",
-      "2026-07-19 08:00"
-    ]);
-    expect(rows.slice(1).map((row) => row[3])).toEqual([
-      "2026-07-20 16:00",
-      "2026-07-20 14:00",
-      "2026-07-20 10:00",
-      "2026-07-19 09:00"
-    ]);
-    expect(rows.flat().includes("REC-DELETE")).toBe(false);
+    expect(response.headers["content-disposition"]).toContain(".pdf");
+    expect(response.body.subarray(0, 4).toString()).toBe("%PDF");
+    expect(pageCount).toBeGreaterThanOrEqual(1);
   });
 
   it("exports only records that match the current filters", async () => {
@@ -1151,29 +1174,11 @@ describe("Issue 4 registry API", () => {
       agent,
       "/api/records/export?keyword=EXPORT&vehicleCode=CAR-001&registrantUsername=admin&businessDate=2026-07-21"
     );
-    const workbook = XLSX.read(response.body, { type: "buffer" });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+    const pageCount = await readPdfPageCount(response.body);
 
     expect(response.status).toBe(200);
-    expect(rows).toHaveLength(2);
-    expect(rows[0]).toEqual([
-      "日期",
-      "出车时间",
-      "还车时间",
-      "事由",
-      "目的地及行车路线",
-      "起步公里读数",
-      "终点公里读数",
-      "行车公里数",
-      "加油费用/数量",
-      "驾驶员签字",
-      "备注"
-    ]);
-    expect(rows[1][0]).toBe("2026-07-21");
-    expect(rows[1][1]).toBe("2026-07-21 09:00");
-    expect(rows[1][2]).toBe("2026-07-21 10:00");
-    expect(rows[1][3]).toBe("EXPORT-MATCH");
+    expect(response.headers["content-type"]).toContain("application/pdf");
+    expect(pageCount).toBe(1);
   });
 
   it("exports full datetime values for records created from datetime-local inputs", async () => {
@@ -1198,19 +1203,12 @@ describe("Issue 4 registry API", () => {
 
     const agent = await adminAgent();
     const response = await getBinaryResponse(agent, "/api/records/export");
-    const workbook = XLSX.read(response.body, { type: "buffer" });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+    const pageCount = await readPdfPageCount(response.body);
 
     expect(response.status).toBe(200);
-    expect(rows).toContainEqual(
-      expect.arrayContaining([
-        "2026-07-22",
-        "2026-07-22 08:15",
-        "2026-07-22 11:20",
-        "导出校验"
-      ])
-    );
+    expect(response.headers["content-type"]).toContain("application/pdf");
+    expect(response.body.subarray(0, 4).toString()).toBe("%PDF");
+    expect(pageCount).toBe(1);
   });
 
   it("rejects export for employees", async () => {
@@ -1222,24 +1220,10 @@ describe("Issue 4 registry API", () => {
   it("exports only a header row when there are no records", async () => {
     const agent = await adminAgent();
     const response = await getBinaryResponse(agent, "/api/records/export");
-    const workbook = XLSX.read(response.body, { type: "buffer" });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+    const pageCount = await readPdfPageCount(response.body);
 
     expect(response.status).toBe(200);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toEqual([
-      "日期",
-      "出车时间",
-      "还车时间",
-      "事由",
-      "目的地及行车路线",
-      "起步公里读数",
-      "终点公里读数",
-      "行车公里数",
-      "加油费用/数量",
-      "驾驶员签字",
-      "备注"
-    ]);
+    expect(response.headers["content-type"]).toContain("application/pdf");
+    expect(pageCount).toBe(1);
   });
 });

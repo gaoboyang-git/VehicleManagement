@@ -1650,6 +1650,132 @@ body {
   line-height: 20px;
 }
 
+.signature-field {
+  gap: 10px;
+}
+
+.signature-field-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.signature-field-caption {
+  display: block;
+  margin-top: 4px;
+  color: #6b7ca4;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.signature-name-button {
+  min-width: auto;
+  padding: 0;
+  color: #1b3585;
+}
+
+.signature-pad-shell {
+  border: 1px solid rgba(27, 53, 133, 0.14);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(245, 248, 255, 0.92), #ffffff);
+  overflow: hidden;
+}
+
+.signature-pad {
+  display: block;
+  width: 100%;
+  height: 156px;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.signature-field-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.signature-reset-button {
+  min-width: 96px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.signature-field-hint {
+  color: #6b7ca4;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.record-signature-preview {
+  display: grid;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.record-signature-preview span {
+  color: #6b7ca4;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.record-signature-preview img {
+  width: 100%;
+  max-width: 220px;
+  height: 88px;
+  object-fit: contain;
+  border-radius: 14px;
+  border: 1px solid rgba(27, 53, 133, 0.12);
+  background: #ffffff;
+}
+
+.record-signature-preview-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.record-signature-preview-button img {
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.record-signature-preview-button:focus-visible img,
+.record-signature-preview-button:hover img {
+  box-shadow: 0 10px 22px rgba(26, 55, 135, 0.16);
+  transform: translateY(-1px);
+}
+
+.signature-preview-sheet {
+  display: grid;
+  gap: 12px;
+}
+
+.signature-preview-sheet-frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+  padding: 18px;
+  border: 1px solid rgba(27, 53, 133, 0.12);
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(246, 249, 255, 0.96), #ffffff);
+}
+
+.signature-preview-sheet-image {
+  width: 100%;
+  max-width: 520px;
+  max-height: 56vh;
+  object-fit: contain;
+  image-rendering: auto;
+}
+
 .sheet-actions-split {
   display: grid;
   grid-template-columns: minmax(70px, 1fr) minmax(150px, 1fr);

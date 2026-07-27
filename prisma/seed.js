@@ -15,12 +15,14 @@ async function main() {
       username: "admin"
     },
     update: {
+      fullName: "管理员",
       passwordHash,
       role: "admin",
       isBuiltinAdmin: true
     },
     create: {
       username: "admin",
+      fullName: "管理员",
       passwordHash,
       role: "admin",
       isBuiltinAdmin: true

@@ -34,6 +34,38 @@ async function createUser(prisma, { username, password, role, isBuiltinAdmin = f
   });
 }
 
+async function createVehicle(prisma, { vehicleCode, plateNumber, brandModel, status = "available" }) {
+  return prisma.vehicle.create({
+    data: {
+      vehicleCode,
+      plateNumber,
+      brandModel,
+      status,
+      isDeleted: false
+    }
+  });
+}
+
+async function createRecord(prisma, { vehicleId, userId }) {
+  return prisma.vehicleUseRecord.create({
+    data: {
+      vehicleId,
+      userId,
+      businessDate: "2026-07-27",
+      departureTime: "2026-07-27T09:00",
+      returnTime: "2026-07-27T10:00",
+      reason: "测试用车",
+      route: "园区-政务大厅",
+      startMileage: 1000,
+      endMileage: 1001,
+      distance: 1,
+      driverName: "测试用户",
+      driverSignature: "测试用户",
+      remark: ""
+    }
+  });
+}
+
 describe("Issue 2 user management API", () => {
   let tempDir;
   let prisma;
@@ -54,6 +86,8 @@ describe("Issue 2 user management API", () => {
   }, 30000);
 
   beforeEach(async () => {
+    await prisma.vehicleUseRecord.deleteMany();
+    await prisma.vehicle.deleteMany();
     await prisma.user.deleteMany();
     await createUser(prisma, {
       username: "admin",
@@ -182,6 +216,33 @@ describe("Issue 2 user management API", () => {
       .post("/api/login")
       .send({ username: "employee", password: "Employee001" })
       .expect(401);
+  });
+
+  it("returns a clear business error when deleting a user who already has records", async () => {
+    const agent = await adminAgent();
+    const employee = await prisma.user.findUnique({
+      where: {
+        username: "employee"
+      }
+    });
+    const vehicle = await createVehicle(prisma, {
+      vehicleCode: "CAR-001",
+      plateNumber: "沪A-10001",
+      brandModel: "大众帕萨特"
+    });
+
+    await createRecord(prisma, {
+      vehicleId: vehicle.id,
+      userId: employee.id
+    });
+
+    const response = await agent.delete(`/api/users/${employee.id}`);
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      message: "账号「employee」已有1条用车记录，暂不支持删除"
+    });
+    expect(await prisma.user.findUnique({ where: { username: "employee" } })).toBeTruthy();
   });
 
   it("rejects deleting the built-in admin account but allows deleting a non-built-in administrator", async () => {

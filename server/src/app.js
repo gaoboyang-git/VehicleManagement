@@ -1,13 +1,16 @@
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
 import { PrismaBetterSQLite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaClient } from "@prisma/client";
+import fontkit from "@pdf-lib/fontkit";
 import bcrypt from "bcryptjs";
 import cors from "cors";
 import express from "express";
-import * as XLSX from "xlsx";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { getRegistryConstraintErrors } from "../../shared/registryConstraints.js";
 
 const databaseUrl = process.env.DATABASE_URL ?? "file:./dev.db";
 const defaultPrisma = new PrismaClient({
@@ -17,6 +20,7 @@ const defaultPrisma = new PrismaClient({
 function toPublicUser(user) {
   return {
     username: user.username,
+    fullName: resolveUserFullName(user),
     role: user.role
   };
 }
@@ -25,6 +29,7 @@ function toManagedUser(user) {
   return {
     id: user.id,
     username: user.username,
+    fullName: resolveUserFullName(user),
     role: user.role,
     isBuiltinAdmin: user.isBuiltinAdmin
   };
@@ -57,7 +62,9 @@ function toPublicRecord(record) {
     isCrossDay: record.isCrossDay,
     fuelFee: record.fuelFee,
     fuelVolume: record.fuelVolume,
+    driverName: resolveRecordDriverName(record),
     driverSignature: record.driverSignature,
+    driverSignatureImage: record.driverSignatureImage ?? null,
     remark: record.remark
   };
 }
@@ -69,8 +76,29 @@ function toManagedRecord(record) {
     plateNumber: record.vehicle.plateNumber,
     brandModel: record.vehicle.brandModel,
     registrantUsername: record.user.username,
+    registrantName: resolveRecordDriverName(record),
     createdAt: record.createdAt.toISOString()
   };
+}
+
+function resolveUserFullName(user) {
+  const fullName = String(user?.fullName ?? "").trim();
+  return fullName || String(user?.username ?? "").trim();
+}
+
+function resolveRecordDriverName(record) {
+  const driverName = String(record?.driverName ?? "").trim();
+  const fallbackSignature = String(record?.driverSignature ?? "").trim();
+
+  if (driverName) {
+    return driverName;
+  }
+
+  if (fallbackSignature) {
+    return fallbackSignature;
+  }
+
+  return resolveUserFullName(record?.user);
 }
 
 function readRequiredText(value) {
@@ -180,31 +208,12 @@ function formatManagedRecordDateTime(record, value, { isReturn = false } = {}) {
   return `${dateText} ${text}`;
 }
 
-function formatExportFileName(date = new Date()) {
+function formatPdfExportFileName(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
-  return `用车记录-${year}年${month}月${day}日.xlsx`;
+  return `用车记录-${year}年${month}月${day}日.pdf`;
 }
-
-const recordExportHeaders = [
-  "日期",
-  "出车时间",
-  "还车时间",
-  "事由",
-  "目的地及行车路线",
-  "起步公里读数",
-  "终点公里读数",
-  "行车公里数",
-  "加油费用/数量",
-  "驾驶员签字",
-  "备注"
-];
-
-const multiVehicleRecordExportHeaders = [
-  "车牌号",
-  ...recordExportHeaders
-];
 
 function parseMileage(value) {
   const text = String(value ?? "").trim();
@@ -245,6 +254,455 @@ function isValidNonNegativeDecimal(value) {
   return Number(text) >= 0;
 }
 
+function isValidSignatureImage(value) {
+  const text = String(value ?? "").trim();
+
+  if (!text) {
+    return false;
+  }
+
+  if (!/^data:image\/(png|jpeg|jpg);base64,/i.test(text)) {
+    return false;
+  }
+
+  return text.length <= 1_500_000;
+}
+
+function formatVehicleDisplay(vehicle) {
+  const plateNumber = String(vehicle?.plateNumber ?? "").trim();
+  const brandModel = String(vehicle?.brandModel ?? "").trim();
+
+  if (plateNumber && brandModel) {
+    return `${plateNumber}-${brandModel}`;
+  }
+
+  return plateNumber || String(vehicle?.vehicleCode ?? "").trim() || "-";
+}
+
+function decodeSignatureImage(dataUrl) {
+  const [header, base64 = ""] = String(dataUrl ?? "").split(",", 2);
+  const format = /data:image\/(png|jpeg|jpg);base64/i.test(header) ? header.toLowerCase() : "";
+
+  return {
+    bytes: Buffer.from(base64, "base64"),
+    format: format.includes("png") ? "png" : "jpg"
+  };
+}
+
+const pdfUnicodeFontCandidates = [
+  resolve(process.cwd(), "server/assets/fonts/ArialUnicode.ttf"),
+  resolve(process.cwd(), "assets/fonts/ArialUnicode.ttf"),
+  "/Library/Fonts/Arial Unicode.ttf",
+  "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+  "/System/Library/Fonts/Hiragino Sans GB.ttc",
+  "/System/Library/Fonts/STHeiti Medium.ttc",
+  "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+  "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
+  "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"
+];
+
+async function loadPdfFonts(pdfDoc) {
+  pdfDoc.registerFontkit(fontkit);
+
+  for (const fontPath of pdfUnicodeFontCandidates) {
+    if (!existsSync(fontPath)) {
+      continue;
+    }
+
+    try {
+      const fontBytes = await readFile(fontPath);
+      const regularFont = await pdfDoc.embedFont(fontBytes, { subset: true });
+      const boldFont = await pdfDoc.embedFont(fontBytes, { subset: true });
+
+      return {
+        regularFont,
+        boldFont,
+        sanitizeText: (value) => String(value ?? "")
+      };
+    } catch {
+      continue;
+    }
+  }
+
+  const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+  return {
+    regularFont,
+    boldFont,
+    sanitizeText: (value) => String(value ?? "").replace(/[^\x20-\x7E]/g, " ")
+  };
+}
+
+function formatPdfDateTimeCell(record, value, options = {}) {
+  const text = formatManagedRecordDateTime(record, value, options);
+
+  if (!text) {
+    return "";
+  }
+
+  const [dateText, timeText = ""] = text.split(" ");
+  return timeText ? `${dateText}\n${timeText}` : dateText;
+}
+
+function truncatePdfLine(line, maxWidth, font, size) {
+  let text = String(line ?? "");
+
+  if (font.widthOfTextAtSize(text, size) <= maxWidth) {
+    return text;
+  }
+
+  while (text.length > 1 && font.widthOfTextAtSize(`${text}…`, size) > maxWidth) {
+    text = text.slice(0, -1);
+  }
+
+  return `${text}…`;
+}
+
+function wrapPdfText(text, maxWidth, font, size, maxLines = 4) {
+  const normalized = String(text ?? "").replace(/\r\n/g, "\n");
+  const hasLineLimit = Number.isFinite(maxLines);
+
+  if (!normalized.trim()) {
+    return [""];
+  }
+
+  const lines = [];
+  const paragraphs = normalized.split("\n");
+
+  for (const paragraph of paragraphs) {
+    if (!paragraph) {
+      lines.push("");
+      if (hasLineLimit && lines.length >= maxLines) {
+        break;
+      }
+      continue;
+    }
+
+    let currentLine = "";
+
+    for (const character of paragraph) {
+      const nextLine = `${currentLine}${character}`;
+
+      if (!currentLine || font.widthOfTextAtSize(nextLine, size) <= maxWidth) {
+        currentLine = nextLine;
+        continue;
+      }
+
+      lines.push(currentLine);
+      currentLine = character;
+
+      if (hasLineLimit && lines.length >= maxLines) {
+        break;
+      }
+    }
+
+    if (hasLineLimit && lines.length >= maxLines) {
+      lines[maxLines - 1] = truncatePdfLine(lines[maxLines - 1], maxWidth, font, size);
+      break;
+    }
+
+    if (currentLine) {
+      lines.push(currentLine);
+    }
+
+    if (hasLineLimit && lines.length >= maxLines) {
+      break;
+    }
+  }
+
+  if (hasLineLimit && lines.length > maxLines) {
+    return lines.slice(0, maxLines);
+  }
+
+  if (hasLineLimit && paragraphs.length > 0 && lines.length === maxLines) {
+    lines[maxLines - 1] = truncatePdfLine(lines[maxLines - 1], maxWidth, font, size);
+  }
+
+  return lines.length ? lines : [""];
+}
+
+function drawPdfCellText(page, { text, x, topY, width, height, font, size, color, align = "left", maxLines = 4 }) {
+  const horizontalPadding = 4;
+  const lineHeight = size + 2;
+  const lines = wrapPdfText(text, Math.max(width - horizontalPadding * 2, 8), font, size, maxLines);
+  const totalHeight = lines.length * lineHeight;
+  let cursorY = topY - Math.max((height - totalHeight) / 2, 6) - size;
+
+  for (const line of lines) {
+    const lineWidth = font.widthOfTextAtSize(line, size);
+    const drawX =
+      align === "center"
+        ? x + Math.max((width - lineWidth) / 2, horizontalPadding)
+        : x + horizontalPadding;
+
+    page.drawText(line, {
+      x: drawX,
+      y: cursorY,
+      size,
+      font,
+      color
+    });
+    cursorY -= lineHeight;
+  }
+}
+
+function getPdfTableColumns(records) {
+  const distinctPlateNumbers = new Set(
+    records.map((record) => String(record.vehicle?.plateNumber ?? "").trim()).filter(Boolean)
+  );
+  const isMultiVehicle = distinctPlateNumbers.size > 1;
+
+  const columns = isMultiVehicle
+    ? [
+        { key: "plateNumber", label: "车牌号", width: 68, align: "center", maxLines: 2, value: (record) => record.vehicle?.plateNumber ?? "-" },
+        { key: "businessDate", label: "日期", width: 60, align: "center", maxLines: 1, value: (record) => record.businessDate || "-" },
+        { key: "departureTime", label: "出车时间", width: 74, align: "center", maxLines: Infinity, value: (record) => formatPdfDateTimeCell(record, record.departureTime) },
+        { key: "returnTime", label: "还车时间", width: 74, align: "center", maxLines: Infinity, value: (record) => formatPdfDateTimeCell(record, record.returnTime, { isReturn: true }) },
+        { key: "reason", label: "事由", width: 78, align: "left", maxLines: Infinity, value: (record) => record.reason || "-" },
+        { key: "route", label: "目的地及行车路线", width: 120, align: "left", maxLines: Infinity, value: (record) => record.route || "-" },
+        { key: "startMileage", label: "起步公里读数", width: 84, align: "center", maxLines: 2, value: (record) => String(record.startMileage ?? "-") },
+        { key: "endMileage", label: "终点公里读数", width: 84, align: "center", maxLines: 2, value: (record) => String(record.endMileage ?? "-") },
+        { key: "distance", label: "行车公里数", width: 68, align: "center", maxLines: 2, value: (record) => String(record.distance ?? "-") },
+        { key: "fuel", label: "加油费用/数量", width: 88, align: "center", maxLines: Infinity, value: (record) => formatFuelExportValue(record.fuelFee, record.fuelVolume) || "-" },
+        { key: "signature", label: "驾驶员签字", width: 74, align: "center", maxLines: 1, value: () => "" },
+        { key: "remark", label: "备注", width: 41, align: "left", maxLines: Infinity, value: (record) => record.remark || "-" }
+      ]
+    : [
+        { key: "businessDate", label: "日期", width: 52, align: "center", maxLines: 2, value: (record) => record.businessDate || "-" },
+        { key: "departureTime", label: "出车时间", width: 76, align: "center", maxLines: Infinity, value: (record) => formatPdfDateTimeCell(record, record.departureTime) },
+        { key: "returnTime", label: "还车时间", width: 76, align: "center", maxLines: Infinity, value: (record) => formatPdfDateTimeCell(record, record.returnTime, { isReturn: true }) },
+        { key: "reason", label: "事由", width: 78, align: "left", maxLines: Infinity, value: (record) => record.reason || "-" },
+        { key: "route", label: "目的地及行车路线", width: 132, align: "left", maxLines: Infinity, value: (record) => record.route || "-" },
+        { key: "startMileage", label: "起步公里读数", width: 88, align: "center", maxLines: 2, value: (record) => String(record.startMileage ?? "-") },
+        { key: "endMileage", label: "终点公里读数", width: 89, align: "center", maxLines: 2, value: (record) => String(record.endMileage ?? "-") },
+        { key: "distance", label: "行车公里数", width: 73, align: "center", maxLines: 2, value: (record) => String(record.distance ?? "-") },
+        { key: "fuel", label: "加油费用/数量", width: 92, align: "center", maxLines: Infinity, value: (record) => formatFuelExportValue(record.fuelFee, record.fuelVolume) || "-" },
+        { key: "signature", label: "驾驶员签字", width: 73, align: "center", maxLines: 1, value: () => "" },
+        { key: "remark", label: "备注", width: 42, align: "left", maxLines: Infinity, value: (record) => record.remark || "-" }
+      ];
+
+  return columns;
+}
+
+function fitPdfTableColumns(columns, pageWidth, marginX) {
+  const totalWidth = columns.reduce((sum, column) => sum + column.width, 0);
+  // Leave a generous right-side safety gap so browser/PDF viewers never crop the last columns.
+  const availableWidth = pageWidth - marginX * 2 - 120;
+
+  if (totalWidth <= availableWidth) {
+    return columns;
+  }
+
+  const scale = availableWidth / totalWidth;
+
+  return columns.map((column) => ({
+    ...column,
+    width: column.width * scale
+  }));
+}
+
+async function createRecordsPdf(records) {
+  const pdfDoc = await PDFDocument.create();
+  const { regularFont, boldFont, sanitizeText } = await loadPdfFonts(pdfDoc);
+  const pageWidth = 841.89;
+  const pageHeight = 595.28;
+  const marginX = 6;
+  const tableTopY = 582;
+  const headerHeight = 38;
+  const baseRowHeight = 39;
+  const bottomMargin = 8;
+  const borderColor = rgb(0, 0, 0);
+  const imageCache = new Map();
+  const columns = fitPdfTableColumns(getPdfTableColumns(records), pageWidth, marginX);
+  const pageContentHeight = tableTopY - headerHeight - bottomMargin;
+  const cellHorizontalPadding = 4;
+  const bodyFontSize = 5.8;
+  const bodyLineHeight = bodyFontSize + 2;
+
+  function measureRowHeight(record) {
+    let maxLineCount = 1;
+
+    for (const column of columns) {
+      if (column.key === "signature") {
+        continue;
+      }
+
+      const text = sanitizeText(column.value(record));
+      const lines = wrapPdfText(
+        text,
+        Math.max(column.width - cellHorizontalPadding * 2, 8),
+        regularFont,
+        bodyFontSize,
+        column.maxLines ?? Infinity
+      );
+
+      maxLineCount = Math.max(maxLineCount, lines.length);
+    }
+
+    return Math.max(baseRowHeight, maxLineCount * bodyLineHeight + 12);
+  }
+
+  const paginatedRows = [];
+  let currentPageRows = [];
+  let usedPageHeight = 0;
+
+  for (const record of records) {
+    const rowHeight = measureRowHeight(record);
+
+    if (currentPageRows.length > 0 && usedPageHeight + rowHeight > pageContentHeight) {
+      paginatedRows.push(currentPageRows);
+      currentPageRows = [];
+      usedPageHeight = 0;
+    }
+
+    currentPageRows.push({ record, rowHeight });
+    usedPageHeight += rowHeight;
+  }
+
+  if (currentPageRows.length === 0) {
+    paginatedRows.push([]);
+  } else {
+    paginatedRows.push(currentPageRows);
+  }
+
+  function drawTableHeader(page) {
+    let currentX = marginX;
+
+    for (const column of columns) {
+      page.drawRectangle({
+        x: currentX,
+        y: tableTopY - headerHeight,
+        width: column.width,
+        height: headerHeight,
+        borderWidth: 1,
+        borderColor
+      });
+      drawPdfCellText(page, {
+        text: sanitizeText(column.label),
+        x: currentX,
+        topY: tableTopY,
+        width: column.width,
+        height: headerHeight,
+        font: boldFont,
+        size: 6.2,
+        color: rgb(0, 0, 0),
+        align: "center",
+        maxLines: 2
+      });
+      currentX += column.width;
+    }
+  }
+
+  async function drawSignatureImage(page, record, x, rowTopY, width, rowHeight) {
+    if (!record.driverSignatureImage) {
+      return;
+    }
+
+    let embeddedImage = imageCache.get(record.driverSignatureImage);
+
+    if (!embeddedImage) {
+      const { bytes, format } = decodeSignatureImage(record.driverSignatureImage);
+      embeddedImage = format === "png" ? await pdfDoc.embedPng(bytes) : await pdfDoc.embedJpg(bytes);
+      imageCache.set(record.driverSignatureImage, embeddedImage);
+    }
+
+    const targetWidth = width - 10;
+    const targetHeight = rowHeight - 8;
+    const imageSize = embeddedImage.scale(1);
+    const scale = Math.min(targetWidth / imageSize.width, targetHeight / imageSize.height);
+    const imageWidth = imageSize.width * scale;
+    const imageHeight = imageSize.height * scale;
+    const imageX = x + (width - imageWidth) / 2;
+    const imageY = rowTopY - rowHeight + (rowHeight - imageHeight) / 2;
+
+    page.drawImage(embeddedImage, {
+      x: imageX,
+      y: imageY,
+      width: imageWidth,
+      height: imageHeight
+    });
+
+    // Draw once more at the same position to strengthen light pen strokes in exported PDFs.
+    page.drawImage(embeddedImage, {
+      x: imageX,
+      y: imageY,
+      width: imageWidth,
+      height: imageHeight
+    });
+  }
+
+  async function drawRecordRow(page, record, rowTopY, rowHeight) {
+    let currentX = marginX;
+
+    for (const column of columns) {
+      page.drawRectangle({
+        x: currentX,
+        y: rowTopY - rowHeight,
+        width: column.width,
+        height: rowHeight,
+        borderWidth: 1,
+        borderColor
+      });
+
+      if (column.key === "signature") {
+        await drawSignatureImage(page, record, currentX, rowTopY, column.width, rowHeight);
+      } else {
+        drawPdfCellText(page, {
+          text: sanitizeText(column.value(record)),
+          x: currentX,
+          topY: rowTopY,
+          width: column.width,
+          height: rowHeight,
+          font: regularFont,
+          size: bodyFontSize,
+          color: rgb(0, 0, 0),
+          align: column.align ?? "center",
+          maxLines: column.maxLines ?? Infinity
+        });
+      }
+
+      currentX += column.width;
+    }
+  }
+
+  const totalPages = Math.max(1, paginatedRows.length);
+
+  for (let pageIndex = 0; pageIndex < totalPages; pageIndex += 1) {
+    const page = pdfDoc.addPage([pageWidth, pageHeight]);
+
+    drawTableHeader(page);
+
+    const pageRows = paginatedRows[pageIndex] ?? [];
+    let cursorY = tableTopY - headerHeight;
+
+    for (const row of pageRows) {
+      await drawRecordRow(page, row.record, cursorY, row.rowHeight);
+      cursorY -= row.rowHeight;
+    }
+
+    while (cursorY - baseRowHeight >= bottomMargin) {
+      let currentX = marginX;
+
+      for (const column of columns) {
+        page.drawRectangle({
+          x: currentX,
+          y: cursorY - baseRowHeight,
+          width: column.width,
+          height: baseRowHeight,
+          borderWidth: 1,
+          borderColor
+        });
+        currentX += column.width;
+      }
+
+      cursorY -= baseRowHeight;
+    }
+  }
+
+  return pdfDoc.save();
+}
+
 const vehicleStatusValues = ["available", "inUse"];
 
 function readVehicleStatus(value, fallback = "available") {
@@ -279,6 +737,8 @@ function readRecordFilters(request) {
 }
 
 function recordMatchesFilters(record, filters) {
+  const registrantName = resolveRecordDriverName(record);
+
   const matchesKeyword = filters.keyword
     ? [
         record.reason,
@@ -286,6 +746,7 @@ function recordMatchesFilters(record, filters) {
         record.vehicle.vehicleCode,
         record.vehicle.plateNumber,
         record.vehicle.brandModel,
+        registrantName,
         record.user.username,
         record.driverSignature,
         record.remark ?? ""
@@ -299,7 +760,7 @@ function recordMatchesFilters(record, filters) {
     ? record.vehicle.vehicleCode === filters.vehicleCode
     : true;
   const matchesUser = filters.registrantUsername
-    ? record.user.username === filters.registrantUsername
+    ? registrantName === filters.registrantUsername || record.user.username === filters.registrantUsername
     : true;
   const matchesDate = filters.businessDate ? record.businessDate === filters.businessDate : true;
 
@@ -532,10 +993,11 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
     asyncHandler(async (request, response) => {
       const username = String(request.body.username ?? "").trim();
       const password = String(request.body.password ?? "");
+      const fullName = String(request.body.fullName ?? "").trim() || username;
       const role = String(request.body.role ?? "");
 
       if (!username || !password || !role) {
-        return response.status(400).json({ message: "账号、密码、角色必填" });
+        return response.status(400).json({ message: "用户姓名、账号、密码、角色必填" });
       }
 
       if (!["admin", "employee"].includes(role)) {
@@ -555,6 +1017,7 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
       const user = await prisma.user.create({
         data: {
           username,
+          fullName,
           passwordHash: await bcrypt.hash(password, 10),
           role,
           isBuiltinAdmin: false
@@ -586,6 +1049,18 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
 
       if (request.auth.user.id === user.id && request.auth.user.username !== "admin") {
         return response.status(400).json({ message: "不能删除当前登录管理员账号" });
+      }
+
+      const recordCount = await prisma.vehicleUseRecord.count({
+        where: {
+          userId: user.id
+        }
+      });
+
+      if (recordCount > 0) {
+        return response.status(400).json({
+          message: `账号「${user.username}」已有${recordCount}条用车记录，暂不支持删除`
+        });
       }
 
       await prisma.user.delete({
@@ -836,49 +1311,16 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
     requireAdmin,
     asyncHandler(async (request, response) => {
       const records = await loadManagedRecords(prisma, readRecordFilters(request));
-      const uniquePlateNumbers = new Set(
-        records.map((record) => record.vehicle?.plateNumber).filter(Boolean)
-      );
-      const useMultiVehicleTemplate = uniquePlateNumbers.size > 1;
-      const rows = [
-        useMultiVehicleTemplate ? multiVehicleRecordExportHeaders : recordExportHeaders,
-        ...records.map((record) => {
-          const plateNumber = record.vehicle?.plateNumber ?? "";
-          const baseRow = [
-            record.businessDate,
-            formatManagedRecordDateTime(record, record.departureTime),
-            formatManagedRecordDateTime(record, record.returnTime, { isReturn: true }),
-            record.reason,
-            record.route,
-            record.startMileage,
-            record.endMileage,
-            record.distance,
-            formatFuelExportValue(record.fuelFee, record.fuelVolume),
-            record.driverSignature,
-            record.remark ?? ""
-          ];
-
-          return useMultiVehicleTemplate ? [plateNumber, ...baseRow] : baseRow;
-        })
-      ];
-      const workbook = XLSX.utils.book_new();
-      const sheet = XLSX.utils.aoa_to_sheet(rows);
-
-      XLSX.utils.book_append_sheet(workbook, sheet, "记录");
-
-      const buffer = XLSX.write(workbook, {
-        bookType: "xlsx",
-        type: "buffer"
-      });
+      const buffer = Buffer.from(await createRecordsPdf(records));
 
       response.setHeader(
         "Content-Type",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        "application/pdf"
       );
-      const fileName = formatExportFileName();
+      const fileName = formatPdfExportFileName();
       response.setHeader(
         "Content-Disposition",
-        `attachment; filename="vehicle-records.xlsx"; filename*=UTF-8''${encodeURIComponent(fileName)}`
+        `attachment; filename="vehicle-records.pdf"; filename*=UTF-8''${encodeURIComponent(fileName)}`
       );
 
       return response.send(buffer);
@@ -898,12 +1340,26 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
       const returnTime = returnDateTime.datetime || returnDateTime.time;
       const reason = readRequiredText(request.body.reason);
       const route = readRequiredText(request.body.route);
-      const driverSignature = readRequiredText(request.body.driverSignature);
+      const legacyDriverSignature = readRequiredText(request.body.driverSignature);
+      const driverName =
+        readRequiredText(request.body.driverName) ||
+        legacyDriverSignature ||
+        resolveUserFullName(request.auth.user);
+      const driverSignatureImage = String(request.body.driverSignatureImage ?? "").trim();
       const startMileage = parseMileage(request.body.startMileage);
       const endMileage = parseMileage(request.body.endMileage);
       const fuelFee = readOptionalText(request.body.fuelFee);
       const fuelVolume = readOptionalText(request.body.fuelVolume);
       const remark = readOptionalText(request.body.remark);
+      const fieldErrors = getRegistryConstraintErrors({
+        reason,
+        route,
+        remark,
+        startMileage: request.body.startMileage,
+        endMileage: request.body.endMileage,
+        fuelFee,
+        fuelVolume
+      });
 
       if (
         !vehicleId ||
@@ -912,10 +1368,17 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
         !returnTime ||
         !reason ||
         !route ||
-        !driverSignature
+        !driverName
       ) {
         return response.status(400).json({
           message: "日期、出车时间、还车时间、事由、路线、起步公里、终点公里、驾驶员签字必填"
+        });
+      }
+
+      if (Object.keys(fieldErrors).length > 0) {
+        return response.status(400).json({
+          message: Object.values(fieldErrors)[0],
+          fieldErrors
         });
       }
 
@@ -925,6 +1388,14 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
 
       if (!isValidNonNegativeDecimal(fuelFee) || !isValidNonNegativeDecimal(fuelVolume)) {
         return response.status(400).json({ message: "加油费用和加油数量必须为非负数字" });
+      }
+
+      if (driverSignatureImage && !isValidSignatureImage(driverSignatureImage)) {
+        return response.status(400).json({ message: "手写签字无效，请重新签字后提交" });
+      }
+
+      if (!driverSignatureImage && !legacyDriverSignature) {
+        return response.status(400).json({ message: "日期、出车时间、还车时间、事由、路线、起步公里、终点公里、驾驶员签字必填" });
       }
 
       if (isReturnEarlierThanDeparture(request.body.departureTime, request.body.returnTime)) {
@@ -963,7 +1434,9 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
               : isReturnEarlierThanDeparture(departureTime, returnTime),
           fuelFee,
           fuelVolume,
-          driverSignature,
+          driverName,
+          driverSignature: driverName,
+          driverSignatureImage: driverSignatureImage || null,
           remark
         }
       });

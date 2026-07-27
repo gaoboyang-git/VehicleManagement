@@ -84,6 +84,7 @@ describe("Issue 1 authentication API", () => {
     expect(response.body).toEqual({
       user: {
         username: "admin",
+        fullName: "admin",
         role: "admin"
       }
     });
@@ -98,6 +99,7 @@ describe("Issue 1 authentication API", () => {
     expect(response.status).toBe(200);
     expect(response.body.user).toEqual({
       username: "employee",
+      fullName: "employee",
       role: "employee"
     });
   });
