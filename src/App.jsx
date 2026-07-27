@@ -811,7 +811,7 @@ function SignatureCanvas({
   minHeight = 156
 }) {
   const canvasRef = useRef(null);
-  const [isDrawing, setIsDrawing] = useState(false);
+  const isDrawingRef = useRef(false);
 
   function safelyGetContext(canvas) {
     if (!canvas?.getContext) {
@@ -916,14 +916,21 @@ function SignatureCanvas({
       return;
     }
 
+    event.preventDefault();
+    if (typeof canvas.setPointerCapture === "function") {
+      try {
+        canvas.setPointerCapture(event.pointerId);
+      } catch {}
+    }
+
     const point = getCanvasPoint(event);
     context.beginPath();
     context.moveTo(point.x, point.y);
-    setIsDrawing(true);
+    isDrawingRef.current = true;
   }
 
   function handlePointerMove(event) {
-    if (!isDrawing) {
+    if (!isDrawingRef.current) {
       return;
     }
 
@@ -934,17 +941,24 @@ function SignatureCanvas({
       return;
     }
 
+    event.preventDefault();
     const point = getCanvasPoint(event);
     context.lineTo(point.x, point.y);
     context.stroke();
   }
 
-  function handlePointerUp() {
-    if (!isDrawing) {
+  function handlePointerUp(event) {
+    if (!isDrawingRef.current) {
       return;
     }
 
-    setIsDrawing(false);
+    event?.preventDefault?.();
+    isDrawingRef.current = false;
+    if (typeof canvasRef.current?.releasePointerCapture === "function" && event?.pointerId !== undefined) {
+      try {
+        canvasRef.current.releasePointerCapture(event.pointerId);
+      } catch {}
+    }
     saveSignature();
   }
 
@@ -956,6 +970,7 @@ function SignatureCanvas({
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
       onPointerLeave={handlePointerUp}
     />
   );

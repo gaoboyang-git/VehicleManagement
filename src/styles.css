@@ -1809,6 +1809,7 @@ body {
   border-radius: 22px;
   background: linear-gradient(180deg, rgba(245, 248, 255, 0.92), #ffffff);
   overflow: hidden;
+  overscroll-behavior: contain;
 }
 
 .signature-pad-fullscreen {
@@ -1835,6 +1836,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  overflow: hidden;
+  overscroll-behavior: contain;
 }
 
 @media (max-width: 720px) {
@@ -1856,6 +1859,7 @@ body {
     height: 100dvh;
     max-height: 100dvh;
     border-radius: 0;
+    overscroll-behavior: contain;
   }
 
   .bottom-sheet-body-signature-editor {
