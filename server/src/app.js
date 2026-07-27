@@ -290,6 +290,8 @@ function decodeSignatureImage(dataUrl) {
 }
 
 const pdfUnicodeFontCandidates = [
+  resolve(process.cwd(), "assets/fonts/NotoSansCJKsc-Regular.otf"),
+  resolve(process.cwd(), "server/assets/fonts/NotoSansCJKsc-Regular.otf"),
   resolve(process.cwd(), "server/assets/fonts/ArialUnicode.ttf"),
   resolve(process.cwd(), "assets/fonts/ArialUnicode.ttf"),
   "/Library/Fonts/Arial Unicode.ttf",
