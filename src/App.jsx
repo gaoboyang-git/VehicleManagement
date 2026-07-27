@@ -843,33 +843,69 @@ function SignatureCanvas({
     if (!context) {
       return;
     }
-    const ratio = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    const width = Math.max(rect.width, minWidth);
-    const height = Math.max(rect.height, minHeight);
 
-    canvas.width = width * ratio;
-    canvas.height = height * ratio;
-    context.setTransform(1, 0, 0, 1, 0, 0);
-    context.scale(ratio, ratio);
-    context.clearRect(0, 0, width, height);
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, width, height);
-    context.lineCap = "round";
-    context.lineJoin = "round";
-    context.lineWidth = 2.8;
-    context.strokeStyle = "#16336f";
+    let frameId = 0;
 
-    if (value) {
-      const image = new Image();
-      image.onload = () => {
-        context.clearRect(0, 0, width, height);
-        context.fillStyle = "#ffffff";
-        context.fillRect(0, 0, width, height);
-        context.drawImage(image, 0, 0, width, height);
-      };
-      image.src = value;
+    function paintCanvas() {
+      const ratio = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      const width = Math.max(rect.width, minWidth);
+      const height = Math.max(rect.height, minHeight);
+
+      if (width <= 0 || height <= 0) {
+        return;
+      }
+
+      canvas.width = width * ratio;
+      canvas.height = height * ratio;
+      context.setTransform(1, 0, 0, 1, 0, 0);
+      context.scale(ratio, ratio);
+      context.clearRect(0, 0, width, height);
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, width, height);
+      context.lineCap = "round";
+      context.lineJoin = "round";
+      context.lineWidth = 2.8;
+      context.strokeStyle = "#16336f";
+
+      if (value) {
+        const image = new Image();
+        image.onload = () => {
+          context.clearRect(0, 0, width, height);
+          context.fillStyle = "#ffffff";
+          context.fillRect(0, 0, width, height);
+          context.drawImage(image, 0, 0, width, height);
+        };
+        image.src = value;
+      }
     }
+
+    function schedulePaint() {
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(paintCanvas);
+    }
+
+    schedulePaint();
+
+    const resizeObserver =
+      typeof ResizeObserver === "function"
+        ? new ResizeObserver(() => {
+            schedulePaint();
+          })
+        : null;
+
+    resizeObserver?.observe(canvas);
+    window.addEventListener("resize", schedulePaint);
+    window.addEventListener("orientationchange", schedulePaint);
+    window.visualViewport?.addEventListener?.("resize", schedulePaint);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", schedulePaint);
+      window.removeEventListener("orientationchange", schedulePaint);
+      window.visualViewport?.removeEventListener?.("resize", schedulePaint);
+    };
   }, [minHeight, minWidth, onChange, value]);
 
   function getCanvasPoint(event) {
