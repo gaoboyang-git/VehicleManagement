@@ -1279,8 +1279,8 @@ describe("Issue 4 registry UI", () => {
 
     const vehicleSelect = await screen.findByLabelText("车辆");
 
-    expect(within(vehicleSelect).getByRole("option", { name: "CAR-001 + 沪A-10001" })).toBeInTheDocument();
-    expect(within(vehicleSelect).getByRole("option", { name: "CAR-002 + 沪A-10002" })).toBeInTheDocument();
+    expect(within(vehicleSelect).getByRole("option", { name: "沪A-10001-大众帕萨特" })).toBeInTheDocument();
+    expect(within(vehicleSelect).getByRole("option", { name: "沪A-10002-别克GL8" })).toBeInTheDocument();
 
     await user.selectOptions(vehicleSelect, "vehicle-b");
     expect(await screen.findByText("当前车辆为使用中状态，请确认后登记")).toBeInTheDocument();
@@ -1430,6 +1430,7 @@ describe("Issue 5 record management UI", () => {
           vehicleId: "vehicle-1",
           vehicleCode: "CAR-001",
           plateNumber: "沪A-10001",
+          brandModel: "大众帕萨特",
           registrantUsername: "employee",
           businessDate: "2026-07-18",
           departureTime: "08:00",
@@ -1451,6 +1452,7 @@ describe("Issue 5 record management UI", () => {
           vehicleId: "vehicle-2",
           vehicleCode: "CAR-002",
           plateNumber: "沪A-10002",
+          brandModel: "别克GL8",
           registrantUsername: "admin",
           businessDate: "2026-07-19",
           departureTime: "09:00",
@@ -1472,6 +1474,7 @@ describe("Issue 5 record management UI", () => {
           vehicleId: "vehicle-1",
           vehicleCode: "CAR-001",
           plateNumber: "沪A-10001",
+          brandModel: "大众帕萨特",
           registrantUsername: "admin",
           businessDate: "2026-07-20",
           departureTime: "10:00",
@@ -1500,6 +1503,14 @@ describe("Issue 5 record management UI", () => {
       .getAllByRole("button", { name: /查看记录 / })
       .map((node) => node.getAttribute("aria-label")?.replace("查看记录 ", ""));
     expect(recordTitles).toEqual(["LATEST", "MIDDLE", "EARLIEST"]);
+    expect(within(recordSection).getByRole("option", { name: "沪A-10001-大众帕萨特" })).toBeInTheDocument();
+    expect(within(recordSection).getByRole("option", { name: "沪A-10002-别克GL8" })).toBeInTheDocument();
+    expect(
+      within(within(recordSection).getByRole("button", { name: "查看记录 LATEST" })).getByText("沪A-10001-大众帕萨特")
+    ).toBeInTheDocument();
+    expect(
+      within(within(recordSection).getByRole("button", { name: "查看记录 MIDDLE" })).getByText("沪A-10002-别克GL8")
+    ).toBeInTheDocument();
 
     await user.type(within(recordSection).getByLabelText("搜索记录"), "MIDDLE");
     expect(within(recordSection).getByRole("button", { name: "查看记录 MIDDLE" })).toBeInTheDocument();

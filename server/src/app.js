@@ -67,6 +67,7 @@ function toManagedRecord(record) {
     ...toPublicRecord(record),
     vehicleCode: record.vehicle.vehicleCode,
     plateNumber: record.vehicle.plateNumber,
+    brandModel: record.vehicle.brandModel,
     registrantUsername: record.user.username,
     createdAt: record.createdAt.toISOString()
   };
@@ -284,6 +285,7 @@ function recordMatchesFilters(record, filters) {
         record.route,
         record.vehicle.vehicleCode,
         record.vehicle.plateNumber,
+        record.vehicle.brandModel,
         record.user.username,
         record.driverSignature,
         record.remark ?? ""

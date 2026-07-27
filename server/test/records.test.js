@@ -723,6 +723,7 @@ describe("Issue 4 registry API", () => {
       expect.objectContaining({
         vehicleCode: "CAR-002",
         plateNumber: "沪A-10002",
+        brandModel: "别克GL8",
         registrantUsername: "employee",
         businessDate: "2026-07-20",
         departureTime: "12:00",
@@ -737,6 +738,7 @@ describe("Issue 4 registry API", () => {
       expect.objectContaining({
         vehicleCode: "CAR-001",
         plateNumber: "沪A-10001",
+        brandModel: "大众帕萨特",
         registrantUsername: "employee",
         reason: "REC-A-OLD"
       })

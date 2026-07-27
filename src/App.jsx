@@ -189,6 +189,17 @@ function summarizeRecord(record) {
   return `${record.vehicleCode} / ${record.businessDate} / ${record.registrantUsername} / ${record.reason}`;
 }
 
+function formatVehicleDisplay(vehicle) {
+  const plateNumber = readRequiredText(vehicle?.plateNumber);
+  const brandModel = readRequiredText(vehicle?.brandModel);
+
+  if (plateNumber && brandModel) {
+    return `${plateNumber}-${brandModel}`;
+  }
+
+  return plateNumber || readRequiredText(vehicle?.vehicleCode) || "-";
+}
+
 function sortRecordsDescending(records) {
   return [...records].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
@@ -1606,6 +1617,7 @@ export function App() {
           record.route,
           record.vehicleCode,
           record.plateNumber,
+          record.brandModel,
           record.registrantUsername,
           record.driverSignature,
           record.remark ?? ""
@@ -1627,6 +1639,21 @@ export function App() {
 
     return matchesKeyword && matchesVehicle && matchesUser && matchesDate;
   });
+  const managedRecordVehicleOptions = Array.from(
+    managedRecords
+      .reduce((options, record) => {
+        if (!options.has(record.vehicleCode)) {
+          options.set(record.vehicleCode, {
+            vehicleCode: record.vehicleCode,
+            plateNumber: record.plateNumber,
+            brandModel: record.brandModel
+          });
+        }
+
+        return options;
+      }, new Map())
+      .values()
+  );
   const areAllFilteredRecordsSelected =
     filteredManagedRecords.length > 0 &&
     filteredManagedRecords.every((record) => selectedRecordIds.includes(record.id));
@@ -1786,7 +1813,7 @@ export function App() {
                   {vehicles.length === 0 ? <option value="">暂无车辆</option> : null}
                   {vehicles.map((vehicle) => (
                     <option key={vehicle.id} value={vehicle.id}>
-                      {vehicle.vehicleCode} + {vehicle.plateNumber}
+                      {formatVehicleDisplay(vehicle)}
                     </option>
                   ))}
                 </select>
@@ -2329,9 +2356,9 @@ export function App() {
                         onChange={(event) => updateRecordFilter("vehicleCode", event.target.value)}
                       >
                         <option value="">全部车辆</option>
-                        {[...new Set(managedRecords.map((record) => record.vehicleCode))].map((vehicleCode) => (
-                          <option key={vehicleCode} value={vehicleCode}>
-                            {vehicleCode}
+                        {managedRecordVehicleOptions.map((vehicle) => (
+                          <option key={vehicle.vehicleCode} value={vehicle.vehicleCode}>
+                            {formatVehicleDisplay(vehicle)}
                           </option>
                         ))}
                       </select>
@@ -2452,7 +2479,7 @@ export function App() {
                           >
                             <span className="record-card-copy">
                               <span className="record-card-heading">
-                                <strong>{record.vehicleCode}</strong>
+                                <strong>{formatVehicleDisplay(record)}</strong>
                                 <span>·</span>
                                 <strong>{record.registrantUsername}</strong>
                               </span>
@@ -2464,7 +2491,7 @@ export function App() {
                           </button>
                           {isExpanded ? (
                             <div className="record-detail-panel">
-                              <small>车牌：{record.plateNumber}</small>
+                              <small>车辆：{formatVehicleDisplay(record)}</small>
                               <small>路线：{record.route}</small>
                               <small>加油：{formatFuelDisplay(record.fuelFee, record.fuelVolume)}</small>
                               <small>
