@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 
 import { PrismaBetterSQLite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaClient } from "@prisma/client";
@@ -13,6 +14,7 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { getRegistryConstraintErrors } from "../../shared/registryConstraints.js";
 
 const databaseUrl = process.env.DATABASE_URL ?? "file:./dev.db";
+const appDirectory = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
 const defaultPrisma = new PrismaClient({
   adapter: new PrismaBetterSQLite3({ url: databaseUrl })
 });
@@ -290,6 +292,8 @@ function decodeSignatureImage(dataUrl) {
 }
 
 const pdfUnicodeFontCandidates = [
+  resolve(appDirectory, "assets/fonts/NotoSansCJKsc-Regular.otf"),
+  resolve(appDirectory, "server/assets/fonts/NotoSansCJKsc-Regular.otf"),
   resolve(process.cwd(), "assets/fonts/NotoSansCJKsc-Regular.otf"),
   resolve(process.cwd(), "server/assets/fonts/NotoSansCJKsc-Regular.otf"),
   resolve(process.cwd(), "server/assets/fonts/ArialUnicode.ttf"),
@@ -313,7 +317,7 @@ async function loadPdfFonts(pdfDoc) {
 
     try {
       const fontBytes = await readFile(fontPath);
-      const regularFont = await pdfDoc.embedFont(fontBytes, { subset: true });
+      const regularFont = await pdfDoc.embedFont(fontBytes, { subset: false });
 
       return {
         regularFont,
