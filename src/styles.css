@@ -3175,20 +3175,25 @@ body,
 }
 
 .vehicle-card-copy {
+  flex: 1 1 auto;
   gap: 2px;
+  min-width: 0;
 }
 
 .vehicle-title-row {
-  flex-wrap: nowrap;
-  gap: 8px;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .vehicle-title-row strong {
   color: #15368e;
+  display: block;
   font-size: 15px;
   font-weight: 800;
   line-height: 21px;
   letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 .vehicle-card-copy p {
@@ -3248,6 +3253,12 @@ body,
 @media (min-width: 721px) {
   .vehicle-card {
     min-height: 78px;
+  }
+
+  .vehicle-title-row {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
   }
 }
 
