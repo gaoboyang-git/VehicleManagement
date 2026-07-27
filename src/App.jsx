@@ -231,8 +231,22 @@ function sortRecordsDescending(records) {
 }
 
 async function readApiMessage(response) {
-  const body = await response.json().catch(() => ({}));
-  return body.message ?? "请求失败，请稍后重试";
+  const clone = typeof response?.clone === "function" ? response.clone() : response;
+  const body = await clone.json().catch(() => null);
+  if (body?.message) {
+    return body.message;
+  }
+
+  if (response.status === 413) {
+    return "手写签字内容过大，请缩短签字范围或清空重签后再提交";
+  }
+
+  const text = await (typeof response?.clone === "function" ? response.clone() : response).text?.().catch(() => "") ?? "";
+  if (/PayloadTooLargeError|request entity too large/i.test(text)) {
+    return "手写签字内容过大，请缩短签字范围或清空重签后再提交";
+  }
+
+  return "请求失败，请稍后重试";
 }
 
 function isComplexPassword(value) {
@@ -743,21 +757,30 @@ function SheetHeader({ title, eyebrow = "", onClose }) {
   );
 }
 
-function BottomSheet({ open, title, ariaLabel, onClose, children }) {
+function BottomSheet({
+  open,
+  title,
+  ariaLabel,
+  onClose,
+  children,
+  className = "",
+  bodyClassName = "",
+  overlayClassName = ""
+}) {
   if (!open) {
     return null;
   }
 
   return (
-    <div className="modal-overlay bottom-sheet-overlay" role="presentation">
+    <div className={`modal-overlay bottom-sheet-overlay ${overlayClassName}`.trim()} role="presentation">
       <section
         aria-label={ariaLabel ?? title}
         aria-modal="true"
-        className="bottom-sheet"
+        className={`bottom-sheet ${className}`.trim()}
         role="dialog"
       >
         <SheetHeader title={title} onClose={onClose} />
-        <div className="bottom-sheet-body">{children}</div>
+        <div className={`bottom-sheet-body ${bodyClassName}`.trim()}>{children}</div>
       </section>
     </div>
   );
@@ -779,7 +802,14 @@ function SignaturePreviewSheet({ open, title, imageSrc, onClose }) {
   );
 }
 
-function SignatureField({ value, onChange, error = "", currentName }) {
+function SignatureCanvas({
+  value,
+  onChange,
+  ariaLabel,
+  className = "signature-pad",
+  minWidth = 280,
+  minHeight = 156
+}) {
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
 
@@ -815,8 +845,8 @@ function SignatureField({ value, onChange, error = "", currentName }) {
     }
     const ratio = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
-    const width = Math.max(rect.width, 280);
-    const height = Math.max(rect.height, 156);
+    const width = Math.max(rect.width, minWidth);
+    const height = Math.max(rect.height, minHeight);
 
     canvas.width = width * ratio;
     canvas.height = height * ratio;
@@ -840,7 +870,7 @@ function SignatureField({ value, onChange, error = "", currentName }) {
       };
       image.src = value;
     }
-  }, [value]);
+  }, [minHeight, minWidth, onChange, value]);
 
   function getCanvasPoint(event) {
     const canvas = canvasRef.current;
@@ -859,7 +889,23 @@ function SignatureField({ value, onChange, error = "", currentName }) {
       return;
     }
 
-    onChange(canvas.toDataURL("image/png"));
+    const rect = canvas.getBoundingClientRect();
+    const exportCanvas = document.createElement("canvas");
+    const exportWidth = Math.max(Math.round(rect.width), minWidth);
+    const exportHeight = Math.max(Math.round(rect.height), minHeight);
+    const exportContext = exportCanvas.getContext("2d");
+
+    if (!exportContext) {
+      onChange(canvas.toDataURL("image/jpeg", 0.82));
+      return;
+    }
+
+    exportCanvas.width = exportWidth;
+    exportCanvas.height = exportHeight;
+    exportContext.fillStyle = "#ffffff";
+    exportContext.fillRect(0, 0, exportWidth, exportHeight);
+    exportContext.drawImage(canvas, 0, 0, exportWidth, exportHeight);
+    onChange(exportCanvas.toDataURL("image/jpeg", 0.82));
   }
 
   function handlePointerDown(event) {
@@ -902,49 +948,112 @@ function SignatureField({ value, onChange, error = "", currentName }) {
     saveSignature();
   }
 
+  return (
+    <canvas
+      ref={canvasRef}
+      aria-label={ariaLabel}
+      className={className}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerLeave={handlePointerUp}
+    />
+  );
+}
+
+function SignatureEditorSheet({ open, value, onChange, currentName, onClose, onClear }) {
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <BottomSheet
+      open={open}
+      title="全屏签字"
+      ariaLabel="全屏签字"
+      onClose={onClose}
+      className="bottom-sheet-signature-editor"
+      bodyClassName="bottom-sheet-body-signature-editor"
+    >
+      <div className="signature-editor-sheet">
+        <div className="sheet-context-row">
+          <strong>签字人：</strong>
+          <span>{currentName || "-"}</span>
+        </div>
+        <div className="signature-editor-shell">
+          <SignatureCanvas
+            ariaLabel="全屏驾驶员手写签字"
+            className="signature-pad signature-pad-fullscreen"
+            minWidth={640}
+            minHeight={360}
+            onChange={onChange}
+            value={value}
+          />
+        </div>
+        <div className="signature-editor-actions">
+          <button className="ghost-button signature-reset-button" type="button" onClick={onClear}>
+            清空重签
+          </button>
+          <button className="primary-button" type="button" onClick={onClose}>
+            完成书写
+          </button>
+        </div>
+      </div>
+    </BottomSheet>
+  );
+}
+
+function SignatureField({ value, onChange, error = "", currentName }) {
+  const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
+
   function handleClearSignature() {
-    const canvas = canvasRef.current;
-    const context = safelyGetContext(canvas);
-
-    if (!canvas || !context) {
-      onChange("");
-      return;
-    }
-
-    const rect = canvas.getBoundingClientRect();
-    context.clearRect(0, 0, rect.width, rect.height);
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, rect.width, rect.height);
     onChange("");
   }
 
   return (
-    <div className="field field-span-2 signature-field">
-      <div className="signature-field-header">
-        <div>
-          <span>驾驶员签字</span>
-          <small className="signature-field-caption">签字人：{currentName || "-"}</small>
+    <>
+      <div className="field field-span-2 signature-field">
+        <div className="signature-field-header">
+          <div>
+            <span>驾驶员签字</span>
+            <small className="signature-field-caption">签字人：{currentName || "-"}</small>
+          </div>
+          <button
+            className="ghost-button signature-fullscreen-button"
+            type="button"
+            onClick={() => setIsFullscreenOpen(true)}
+          >
+            全屏书写
+          </button>
         </div>
+        <div className="signature-pad-shell">
+          <SignatureCanvas ariaLabel="驾驶员手写签字" onChange={onChange} value={value} />
+        </div>
+        <div className="signature-field-actions">
+          <div className="signature-action-buttons">
+            <button
+              className="ghost-button signature-fullscreen-button signature-fullscreen-button-mobile"
+              type="button"
+              onClick={() => setIsFullscreenOpen(true)}
+            >
+              全屏书写
+            </button>
+            <button className="ghost-button signature-reset-button" type="button" onClick={handleClearSignature}>
+              清空重签
+            </button>
+          </div>
+        </div>
+        {error ? <small className="error">{error}</small> : null}
       </div>
-      <div className="signature-pad-shell">
-        <canvas
-          ref={canvasRef}
-          aria-label="驾驶员手写签字"
-          className="signature-pad"
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerLeave={handlePointerUp}
-        />
-      </div>
-      <div className="signature-field-actions">
-        <small className="signature-field-hint">请在签字区域内手写签名，提交时会以图片形式保存。</small>
-        <button className="ghost-button signature-reset-button" type="button" onClick={handleClearSignature}>
-          清空重签
-        </button>
-      </div>
-      {error ? <small className="error">{error}</small> : null}
-    </div>
+      <SignatureEditorSheet
+        currentName={currentName}
+        onChange={onChange}
+        onClear={handleClearSignature}
+        onClose={() => setIsFullscreenOpen(false)}
+        open={isFullscreenOpen}
+        value={value}
+      />
+    </>
   );
 }
 
@@ -1853,6 +1962,7 @@ export function App() {
     });
 
     if (!response.ok) {
+      const responseCopy = typeof response?.clone === "function" ? response.clone() : response;
       const body = await response.json().catch(() => ({}));
       if (body.fieldErrors && typeof body.fieldErrors === "object") {
         setRegistryErrors((current) => ({
@@ -1860,7 +1970,7 @@ export function App() {
           ...body.fieldErrors
         }));
       }
-      setRegistryMessage(createBannerMessage(body.message ?? "提交失败，请稍后重试"));
+      setRegistryMessage(createBannerMessage(body.message ?? (await readApiMessage(responseCopy))));
       return;
     }
 

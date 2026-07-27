@@ -1294,6 +1294,37 @@ describe("Issue 4 registry UI", () => {
     await user.selectOptions(vehicleSelect, "vehicle-b");
     expect(await screen.findByText("当前车辆为使用中状态，请确认后登记")).toBeInTheDocument();
   });
+
+  it("opens a fullscreen signature sheet for easier mobile handwriting and closes it", async () => {
+    mockRegistryFetch({
+      vehicles: [
+        {
+          id: "vehicle-1",
+          vehicleCode: "CAR-001",
+          plateNumber: "沪A-10001",
+          brandModel: "大众帕萨特",
+          status: "available",
+          isDeleted: false
+        }
+      ]
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+    await loginAsEmployee(user);
+    await screen.findByLabelText("驾驶员手写签字");
+
+    await user.click(screen.getAllByRole("button", { name: "全屏书写" })[0]);
+
+    expect(await screen.findByRole("dialog", { name: "全屏签字" })).toBeInTheDocument();
+    expect(screen.getByLabelText("全屏驾驶员手写签字")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "完成书写" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "全屏签字" })).not.toBeInTheDocument();
+    });
+  });
 });
 
 describe("Issue 5 record management UI", () => {

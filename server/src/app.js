@@ -842,7 +842,7 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
   const clientDistPath = resolve(process.cwd(), "dist");
 
   app.use(cors({ credentials: true, origin: true }));
-  app.use(express.json());
+  app.use(express.json({ limit: "4mb" }));
 
   async function requireLogin(request, response, next) {
     const sessionId = readCookie(request, "sessionId");
@@ -1515,6 +1515,16 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
       return response.sendStatus(204);
     })
   );
+
+  app.use((error, _request, response, next) => {
+    if (error?.type === "entity.too.large" || error?.status === 413) {
+      return response.status(413).json({
+        message: "手写签字内容过大，请缩短签字范围或清空重签后再提交"
+      });
+    }
+
+    return next(error);
+  });
 
   if (existsSync(clientDistPath)) {
     app.use(express.static(clientDistPath));
