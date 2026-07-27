@@ -736,16 +736,30 @@ function isValidVehicleStatus(status) {
 }
 
 function readRecordFilters(request) {
+  const recordIds = String(request.query.recordIds ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
   return {
     keyword: String(request.query.keyword ?? "").trim().toLowerCase(),
+    vehicleId: String(request.query.vehicleId ?? "").trim(),
     vehicleCode: String(request.query.vehicleCode ?? "").trim(),
     registrantUsername: String(request.query.registrantUsername ?? "").trim(),
-    businessDate: String(request.query.businessDate ?? "").trim()
+    businessDate: String(request.query.businessDate ?? "").trim(),
+    recordScope: String(request.query.recordScope ?? "").trim(),
+    recordIds: new Set(recordIds)
   };
 }
 
 function recordMatchesFilters(record, filters) {
   const registrantName = resolveRecordDriverName(record);
+
+  if (filters.recordScope === "visible") {
+    if (!filters.recordIds?.has(record.id)) {
+      return false;
+    }
+  }
 
   const matchesKeyword = filters.keyword
     ? [
@@ -764,9 +778,11 @@ function recordMatchesFilters(record, filters) {
         .includes(filters.keyword)
     : true;
 
-  const matchesVehicle = filters.vehicleCode
-    ? record.vehicle.vehicleCode === filters.vehicleCode
-    : true;
+  const matchesVehicle = filters.vehicleId
+    ? record.vehicleId === filters.vehicleId
+    : filters.vehicleCode
+      ? record.vehicle.vehicleCode === filters.vehicleCode
+      : true;
   const matchesUser = filters.registrantUsername
     ? registrantName === filters.registrantUsername || record.user.username === filters.registrantUsername
     : true;

@@ -315,12 +315,19 @@ function getVehicleUsageStatus(vehicle) {
   return "空闲中";
 }
 
-function buildRecordQueryString(filters) {
+function buildRecordQueryString(filters, visibleRecordIds) {
   const params = new URLSearchParams();
   params.set("keyword", String(filters.keyword ?? ""));
+  params.set("vehicleId", String(filters.vehicleId ?? ""));
   params.set("vehicleCode", String(filters.vehicleCode ?? ""));
   params.set("registrantUsername", String(filters.registrantUsername ?? ""));
   params.set("businessDate", String(filters.businessDate ?? ""));
+
+  if (Array.isArray(visibleRecordIds)) {
+    params.set("recordScope", "visible");
+    params.set("recordIds", visibleRecordIds.join(","));
+  }
+
   return params.toString();
 }
 
@@ -1265,6 +1272,7 @@ export function App() {
   const [previewSignatureRecord, setPreviewSignatureRecord] = useState(null);
   const [recordFilters, setRecordFilters] = useState({
     keyword: "",
+    vehicleId: "",
     vehicleCode: "",
     registrantUsername: "",
     businessDate: ""
@@ -1430,6 +1438,7 @@ export function App() {
     setIsBulkDeleteOpen(false);
     setRecordFilters({
       keyword: "",
+      vehicleId: "",
       vehicleCode: "",
       registrantUsername: "",
       businessDate: ""
@@ -1482,7 +1491,10 @@ export function App() {
   }
 
   async function handleExportRecords() {
-    const queryString = buildRecordQueryString(recordFilters);
+    const queryString = buildRecordQueryString(
+      recordFilters,
+      filteredManagedRecords.map((record) => record.id)
+    );
     const response = await fetch(`/api/records/export?${queryString}`, {
       credentials: "include"
     });
@@ -2121,9 +2133,11 @@ export function App() {
           .includes(keyword)
       : true;
 
-    const matchesVehicle = recordFilters.vehicleCode
-      ? record.vehicleCode === recordFilters.vehicleCode
-      : true;
+    const matchesVehicle = recordFilters.vehicleId
+      ? record.vehicleId === recordFilters.vehicleId
+      : recordFilters.vehicleCode
+        ? record.vehicleCode === recordFilters.vehicleCode
+        : true;
     const matchesUser = recordFilters.registrantUsername
       ? resolveRecordRegistrantName(record) === recordFilters.registrantUsername
       : true;
@@ -2136,8 +2150,9 @@ export function App() {
   const managedRecordVehicleOptions = Array.from(
     managedRecords
       .reduce((options, record) => {
-        if (!options.has(record.vehicleCode)) {
-          options.set(record.vehicleCode, {
+        if (!options.has(record.vehicleId)) {
+          options.set(record.vehicleId, {
+            vehicleId: record.vehicleId,
             vehicleCode: record.vehicleCode,
             plateNumber: record.plateNumber,
             brandModel: record.brandModel
@@ -2859,12 +2874,12 @@ export function App() {
                     <label className="field">
                       <span>按车辆筛选</span>
                       <select
-                        value={recordFilters.vehicleCode}
-                        onChange={(event) => updateRecordFilter("vehicleCode", event.target.value)}
+                        value={recordFilters.vehicleId}
+                        onChange={(event) => updateRecordFilter("vehicleId", event.target.value)}
                       >
                         <option value="">全部车辆</option>
                         {managedRecordVehicleOptions.map((vehicle) => (
-                          <option key={vehicle.vehicleCode} value={vehicle.vehicleCode}>
+                          <option key={vehicle.vehicleId} value={vehicle.vehicleId}>
                             {formatVehicleDisplay(vehicle)}
                           </option>
                         ))}

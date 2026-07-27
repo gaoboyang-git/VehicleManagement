@@ -45,8 +45,18 @@ function parseMockUrl(url) {
 
 function filterRecords(records, filters) {
   const keyword = String(filters.keyword ?? "").trim().toLowerCase();
+  const recordIds = new Set(
+    String(filters.recordIds ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean)
+  );
 
   return records.filter((record) => {
+    if (filters.recordScope === "visible" && !recordIds.has(record.id)) {
+      return false;
+    }
+
     const matchesKeyword = keyword
       ? [
           record.reason,
@@ -62,7 +72,11 @@ function filterRecords(records, filters) {
           .includes(keyword)
       : true;
 
-    const matchesVehicle = filters.vehicleCode ? record.vehicleCode === filters.vehicleCode : true;
+    const matchesVehicle = filters.vehicleId
+      ? record.vehicleId === filters.vehicleId
+      : filters.vehicleCode
+        ? record.vehicleCode === filters.vehicleCode
+        : true;
     const matchesUser = filters.registrantUsername
       ? record.registrantUsername === filters.registrantUsername
       : true;
@@ -377,9 +391,12 @@ function mockAdminRecordManagementFetch({
     if (pathname === "/api/records" && method === "GET") {
       const filters = {
         keyword: requestUrl.searchParams.get("keyword") ?? "",
+        vehicleId: requestUrl.searchParams.get("vehicleId") ?? "",
         vehicleCode: requestUrl.searchParams.get("vehicleCode") ?? "",
         registrantUsername: requestUrl.searchParams.get("registrantUsername") ?? "",
-        businessDate: requestUrl.searchParams.get("businessDate") ?? ""
+        businessDate: requestUrl.searchParams.get("businessDate") ?? "",
+        recordScope: requestUrl.searchParams.get("recordScope") ?? "",
+        recordIds: requestUrl.searchParams.get("recordIds") ?? ""
       };
 
       return okJson({
@@ -1362,6 +1379,7 @@ describe("Issue 5 record management UI", () => {
           vehicleId: "vehicle-1",
           vehicleCode: "CAR-001",
           plateNumber: "沪A-10001",
+          brandModel: "轿车",
           registrantUsername: "admin",
           businessDate: "2026-07-20",
           departureTime: "2026-07-20T09:00",
@@ -1612,7 +1630,7 @@ describe("Issue 5 record management UI", () => {
     expect(within(recordSection).queryByRole("button", { name: "查看记录 LATEST" })).not.toBeInTheDocument();
 
     await user.clear(within(recordSection).getByLabelText("搜索记录"));
-    await user.selectOptions(within(recordSection).getByLabelText("按车辆筛选"), "CAR-001");
+    await user.selectOptions(within(recordSection).getByLabelText("按车辆筛选"), "vehicle-1");
     expect(within(recordSection).getByRole("button", { name: "查看记录 LATEST" })).toBeInTheDocument();
     expect(within(recordSection).getByRole("button", { name: "查看记录 EARLIEST" })).toBeInTheDocument();
     expect(within(recordSection).queryByRole("button", { name: "查看记录 MIDDLE" })).not.toBeInTheDocument();
@@ -1859,7 +1877,7 @@ describe("Issue 5 record management UI", () => {
     render(<App />);
     await loginAsAdminAndOpenRecords(user);
     await user.type(screen.getByLabelText("搜索记录"), "REC-001");
-    await user.selectOptions(screen.getByLabelText("按车辆筛选"), "CAR-001");
+    await user.selectOptions(screen.getByLabelText("按车辆筛选"), "vehicle-1");
     fireEvent.change(screen.getByLabelText("按日期筛选"), {
       target: { value: "2026-07-20" }
     });
@@ -1871,7 +1889,7 @@ describe("Issue 5 record management UI", () => {
       fetchMock.mock.calls.some(
         ([url]) =>
           url ===
-          "/api/records/export?keyword=REC-001&vehicleCode=CAR-001&registrantUsername=&businessDate=2026-07-20"
+          "/api/records/export?keyword=REC-001&vehicleId=vehicle-1&vehicleCode=&registrantUsername=&businessDate=2026-07-20&recordScope=visible&recordIds=record-1"
       )
     ).toBe(true);
     expect(createObjectUrlSpy).toHaveBeenCalledTimes(1);

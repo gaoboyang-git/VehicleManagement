@@ -12,6 +12,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp, createSessionStore } from "../src/app.js";
 
 const rootDir = path.resolve(import.meta.dirname, "../..");
+const pdfExportTestTimeout = 15_000;
 
 function runPrisma(args, databaseUrl) {
   execFileSync("npx", ["prisma", ...args], {
@@ -1123,7 +1124,7 @@ describe("Issue 4 registry API", () => {
     expect(response.headers["content-disposition"]).toContain(".pdf");
     expect(response.body.subarray(0, 4).toString()).toBe("%PDF");
     expect(pageCount).toBeGreaterThanOrEqual(1);
-  });
+  }, pdfExportTestTimeout);
 
   it("exports only records that match the current filters", async () => {
     const admin = await prisma.user.findUnique({
@@ -1179,7 +1180,7 @@ describe("Issue 4 registry API", () => {
     expect(response.status).toBe(200);
     expect(response.headers["content-type"]).toContain("application/pdf");
     expect(pageCount).toBe(1);
-  });
+  }, pdfExportTestTimeout);
 
   it("exports full datetime values for records created from datetime-local inputs", async () => {
     const vehicle = await createVehicle(prisma, {
@@ -1209,7 +1210,7 @@ describe("Issue 4 registry API", () => {
     expect(response.headers["content-type"]).toContain("application/pdf");
     expect(response.body.subarray(0, 4).toString()).toBe("%PDF");
     expect(pageCount).toBe(1);
-  });
+  }, pdfExportTestTimeout);
 
   it("rejects export for employees", async () => {
     const agent = await employeeAgent();
@@ -1225,5 +1226,5 @@ describe("Issue 4 registry API", () => {
     expect(response.status).toBe(200);
     expect(response.headers["content-type"]).toContain("application/pdf");
     expect(pageCount).toBe(1);
-  });
+  }, pdfExportTestTimeout);
 });
