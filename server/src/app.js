@@ -307,29 +307,51 @@ const pdfUnicodeFontCandidates = [
   "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"
 ];
 
+let cachedPdfUnicodeFontSourcePromise;
+
+async function getCachedPdfUnicodeFontSource() {
+  if (!cachedPdfUnicodeFontSourcePromise) {
+    cachedPdfUnicodeFontSourcePromise = (async () => {
+      for (const fontPath of pdfUnicodeFontCandidates) {
+        if (!existsSync(fontPath)) {
+          continue;
+        }
+
+        try {
+          const fontBytes = await readFile(fontPath);
+
+          return {
+            fontBytes,
+            sanitizeText: (value) => String(value ?? "")
+          };
+        } catch {
+          continue;
+        }
+      }
+
+      return null;
+    })();
+  }
+
+  return cachedPdfUnicodeFontSourcePromise;
+}
+
 async function loadPdfFonts(pdfDoc) {
   pdfDoc.registerFontkit(fontkit);
 
-  for (const fontPath of pdfUnicodeFontCandidates) {
-    if (!existsSync(fontPath)) {
-      continue;
-    }
+  const cachedFontSource = await getCachedPdfUnicodeFontSource();
 
-    try {
-      const fontBytes = await readFile(fontPath);
-      const regularFont = await pdfDoc.embedFont(fontBytes, { subset: false });
+  if (cachedFontSource) {
+    const regularFont = await pdfDoc.embedFont(cachedFontSource.fontBytes, { subset: false });
 
-      return {
-        regularFont,
-        // Reuse the same Unicode-capable font for table headers.
-        // Embedding a second "bold" instance from some system CJK fonts can render
-        // Chinese text as solid blocks in exported PDFs.
-        boldFont: regularFont,
-        sanitizeText: (value) => String(value ?? "")
-      };
-    } catch {
-      continue;
-    }
+    return {
+      regularFont,
+      // Reuse the same Unicode-capable font for table headers.
+      // Embedding a second "bold" instance from some system CJK fonts can render
+      // Chinese text as solid blocks in exported PDFs.
+      boldFont: regularFont,
+      sanitizeText: cachedFontSource.sanitizeText
+    };
   }
 
   const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -430,14 +452,15 @@ function wrapPdfText(text, maxWidth, font, size, maxLines = 4) {
   return lines.length ? lines : [""];
 }
 
-function drawPdfCellText(page, { text, x, topY, width, height, font, size, color, align = "left", maxLines = 4 }) {
+function drawPdfCellText(page, { text, lines, x, topY, width, height, font, size, color, align = "left", maxLines = 4 }) {
   const horizontalPadding = 4;
   const lineHeight = size + 2;
-  const lines = wrapPdfText(text, Math.max(width - horizontalPadding * 2, 8), font, size, maxLines);
-  const totalHeight = lines.length * lineHeight;
+  const resolvedLines =
+    lines ?? wrapPdfText(text, Math.max(width - horizontalPadding * 2, 8), font, size, maxLines);
+  const totalHeight = resolvedLines.length * lineHeight;
   let cursorY = topY - Math.max((height - totalHeight) / 2, 6) - size;
 
-  for (const line of lines) {
+  for (const line of resolvedLines) {
     const lineWidth = font.widthOfTextAtSize(line, size);
     const drawX =
       align === "center"
@@ -528,8 +551,9 @@ async function createRecordsPdf(records) {
   const bodyFontSize = 5.8;
   const bodyLineHeight = bodyFontSize + 2;
 
-  function measureRowHeight(record) {
+  function buildRowLayout(record) {
     let maxLineCount = 1;
+    const cellLayouts = new Map();
 
     for (const column of columns) {
       if (column.key === "signature") {
@@ -545,10 +569,18 @@ async function createRecordsPdf(records) {
         column.maxLines ?? Infinity
       );
 
+      cellLayouts.set(column.key, {
+        text,
+        lines
+      });
       maxLineCount = Math.max(maxLineCount, lines.length);
     }
 
-    return Math.max(baseRowHeight, maxLineCount * bodyLineHeight + 12);
+    return {
+      record,
+      cellLayouts,
+      rowHeight: Math.max(baseRowHeight, maxLineCount * bodyLineHeight + 12)
+    };
   }
 
   const paginatedRows = [];
@@ -556,16 +588,16 @@ async function createRecordsPdf(records) {
   let usedPageHeight = 0;
 
   for (const record of records) {
-    const rowHeight = measureRowHeight(record);
+    const rowLayout = buildRowLayout(record);
 
-    if (currentPageRows.length > 0 && usedPageHeight + rowHeight > pageContentHeight) {
+    if (currentPageRows.length > 0 && usedPageHeight + rowLayout.rowHeight > pageContentHeight) {
       paginatedRows.push(currentPageRows);
       currentPageRows = [];
       usedPageHeight = 0;
     }
 
-    currentPageRows.push({ record, rowHeight });
-    usedPageHeight += rowHeight;
+    currentPageRows.push(rowLayout);
+    usedPageHeight += rowLayout.rowHeight;
   }
 
   if (currentPageRows.length === 0) {
@@ -640,7 +672,8 @@ async function createRecordsPdf(records) {
     });
   }
 
-  async function drawRecordRow(page, record, rowTopY, rowHeight) {
+  async function drawRecordRow(page, rowLayout, rowTopY) {
+    const { record, rowHeight, cellLayouts } = rowLayout;
     let currentX = marginX;
 
     for (const column of columns) {
@@ -656,8 +689,10 @@ async function createRecordsPdf(records) {
       if (column.key === "signature") {
         await drawSignatureImage(page, record, currentX, rowTopY, column.width, rowHeight);
       } else {
+        const cellLayout = cellLayouts.get(column.key);
         drawPdfCellText(page, {
-          text: sanitizeText(column.value(record)),
+          text: cellLayout?.text ?? "",
+          lines: cellLayout?.lines,
           x: currentX,
           topY: rowTopY,
           width: column.width,
@@ -685,7 +720,7 @@ async function createRecordsPdf(records) {
     let cursorY = tableTopY - headerHeight;
 
     for (const row of pageRows) {
-      await drawRecordRow(page, row.record, cursorY, row.rowHeight);
+      await drawRecordRow(page, row, cursorY);
       cursorY -= row.rowHeight;
     }
 
