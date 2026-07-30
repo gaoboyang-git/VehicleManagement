@@ -48,6 +48,7 @@ model VehicleUseRecord {
   driverName      String   @default("")
   driverSignature String
   driverSignatureImage String?
+  driverSignaturePdfImage String?
   remark          String?
   createdAt       DateTime @default(now())
   vehicle         Vehicle  @relation(fields: [vehicleId], references: [id])

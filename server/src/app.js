@@ -66,7 +66,7 @@ function toPublicRecord(record) {
     fuelVolume: record.fuelVolume,
     driverName: resolveRecordDriverName(record),
     driverSignature: record.driverSignature,
-    driverSignatureImage: record.driverSignatureImage ?? null,
+    hasDriverSignature: Boolean(record.driverSignatureImage || record.driverSignature),
     remark: record.remark
   };
 }
@@ -282,13 +282,30 @@ function formatVehicleDisplay(vehicle) {
 }
 
 function decodeSignatureImage(dataUrl) {
-  const [header, base64 = ""] = String(dataUrl ?? "").split(",", 2);
-  const format = /data:image\/(png|jpeg|jpg);base64/i.test(header) ? header.toLowerCase() : "";
+  const cacheKey = String(dataUrl ?? "");
+  const cachedPayload = cachedDecodedSignatureImagePayloads.get(cacheKey);
 
-  return {
+  if (cachedPayload) {
+    cachedDecodedSignatureImagePayloads.delete(cacheKey);
+    cachedDecodedSignatureImagePayloads.set(cacheKey, cachedPayload);
+    return cachedPayload;
+  }
+
+  const [header, base64 = ""] = cacheKey.split(",", 2);
+  const format = /data:image\/(png|jpeg|jpg);base64/i.test(header) ? header.toLowerCase() : "";
+  const payload = {
     bytes: Buffer.from(base64, "base64"),
     format: format.includes("png") ? "png" : "jpg"
   };
+
+  cachedDecodedSignatureImagePayloads.set(cacheKey, payload);
+
+  if (cachedDecodedSignatureImagePayloads.size > MAX_CACHED_SIGNATURE_IMAGES) {
+    const oldestKey = cachedDecodedSignatureImagePayloads.keys().next().value;
+    cachedDecodedSignatureImagePayloads.delete(oldestKey);
+  }
+
+  return payload;
 }
 
 const pdfUnicodeFontCandidates = [
@@ -308,6 +325,10 @@ const pdfUnicodeFontCandidates = [
 ];
 
 let cachedPdfUnicodeFontSourcePromise;
+const cachedDecodedSignatureImagePayloads = new Map();
+const cachedPdfTextLayouts = new Map();
+const MAX_CACHED_SIGNATURE_IMAGES = 120;
+const MAX_CACHED_TEXT_LAYOUTS = 4000;
 
 async function getCachedPdfUnicodeFontSource() {
   if (!cachedPdfUnicodeFontSourcePromise) {
@@ -392,9 +413,18 @@ function truncatePdfLine(line, maxWidth, font, size) {
 function wrapPdfText(text, maxWidth, font, size, maxLines = 4) {
   const normalized = String(text ?? "").replace(/\r\n/g, "\n");
   const hasLineLimit = Number.isFinite(maxLines);
+  const cacheKey = [size, Math.round(maxWidth * 100) / 100, hasLineLimit ? maxLines : "inf", normalized].join("|");
 
   if (!normalized.trim()) {
     return [""];
+  }
+
+  const cachedLayout = cachedPdfTextLayouts.get(cacheKey);
+
+  if (cachedLayout) {
+    cachedPdfTextLayouts.delete(cacheKey);
+    cachedPdfTextLayouts.set(cacheKey, cachedLayout);
+    return cachedLayout;
   }
 
   const lines = [];
@@ -449,7 +479,15 @@ function wrapPdfText(text, maxWidth, font, size, maxLines = 4) {
     lines[maxLines - 1] = truncatePdfLine(lines[maxLines - 1], maxWidth, font, size);
   }
 
-  return lines.length ? lines : [""];
+  const resolvedLines = lines.length ? lines : [""];
+  cachedPdfTextLayouts.set(cacheKey, resolvedLines);
+
+  if (cachedPdfTextLayouts.size > MAX_CACHED_TEXT_LAYOUTS) {
+    const oldestKey = cachedPdfTextLayouts.keys().next().value;
+    cachedPdfTextLayouts.delete(oldestKey);
+  }
+
+  return resolvedLines;
 }
 
 function drawPdfCellText(page, { text, lines, x, topY, width, height, font, size, color, align = "left", maxLines = 4 }) {
@@ -486,7 +524,7 @@ function getPdfTableColumns(records) {
 
   const columns = isMultiVehicle
     ? [
-        { key: "plateNumber", label: "车牌号", width: 68, align: "center", maxLines: 2, value: (record) => record.vehicle?.plateNumber ?? "-" },
+        { key: "plateNumber", label: "车牌号", width: 72, fixed: true, align: "center", maxLines: 2, value: (record) => record.vehicle?.plateNumber ?? "-" },
         { key: "businessDate", label: "日期", width: 60, align: "center", maxLines: 1, value: (record) => record.businessDate || "-" },
         { key: "departureTime", label: "出车时间", width: 74, align: "center", maxLines: Infinity, value: (record) => formatPdfDateTimeCell(record, record.departureTime) },
         { key: "returnTime", label: "还车时间", width: 74, align: "center", maxLines: Infinity, value: (record) => formatPdfDateTimeCell(record, record.returnTime, { isReturn: true }) },
@@ -525,11 +563,26 @@ function fitPdfTableColumns(columns, pageWidth, marginX) {
     return columns;
   }
 
-  const scale = availableWidth / totalWidth;
+  const fixedWidth = columns
+    .filter((column) => column.fixed)
+    .reduce((sum, column) => sum + column.width, 0);
+  const flexibleColumns = columns.filter((column) => !column.fixed);
+  const flexibleWidth = flexibleColumns.reduce((sum, column) => sum + column.width, 0);
+
+  if (flexibleColumns.length === 0 || fixedWidth >= availableWidth) {
+    const scale = availableWidth / totalWidth;
+
+    return columns.map((column) => ({
+      ...column,
+      width: column.width * scale
+    }));
+  }
+
+  const scale = (availableWidth - fixedWidth) / flexibleWidth;
 
   return columns.map((column) => ({
     ...column,
-    width: column.width * scale
+    width: column.fixed ? column.width : column.width * scale
   }));
 }
 
@@ -635,16 +688,18 @@ async function createRecordsPdf(records) {
   }
 
   async function drawSignatureImage(page, record, x, rowTopY, width, rowHeight) {
-    if (!record.driverSignatureImage) {
+    const signatureImageDataUrl = record.driverSignaturePdfImage || record.driverSignatureImage;
+
+    if (!signatureImageDataUrl) {
       return;
     }
 
-    let embeddedImage = imageCache.get(record.driverSignatureImage);
+    let embeddedImage = imageCache.get(signatureImageDataUrl);
 
     if (!embeddedImage) {
-      const { bytes, format } = decodeSignatureImage(record.driverSignatureImage);
+      const { bytes, format } = decodeSignatureImage(signatureImageDataUrl);
       embeddedImage = format === "png" ? await pdfDoc.embedPng(bytes) : await pdfDoc.embedJpg(bytes);
-      imageCache.set(record.driverSignatureImage, embeddedImage);
+      imageCache.set(signatureImageDataUrl, embeddedImage);
     }
 
     const targetWidth = width - 10;
@@ -1405,6 +1460,7 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
         legacyDriverSignature ||
         resolveUserFullName(request.auth.user);
       const driverSignatureImage = String(request.body.driverSignatureImage ?? "").trim();
+      const driverSignaturePdfImage = String(request.body.driverSignaturePdfImage ?? "").trim();
       const startMileage = parseMileage(request.body.startMileage);
       const endMileage = parseMileage(request.body.endMileage);
       const fuelFee = readOptionalText(request.body.fuelFee);
@@ -1453,6 +1509,10 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
         return response.status(400).json({ message: "手写签字无效，请重新签字后提交" });
       }
 
+      if (driverSignaturePdfImage && !isValidSignatureImage(driverSignaturePdfImage)) {
+        return response.status(400).json({ message: "导出签字图片无效，请重新签字后提交" });
+      }
+
       if (!driverSignatureImage && !legacyDriverSignature) {
         return response.status(400).json({ message: "日期、出车时间、还车时间、事由、路线、起步公里、终点公里、驾驶员签字必填" });
       }
@@ -1496,6 +1556,7 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
           driverName,
           driverSignature: driverName,
           driverSignatureImage: driverSignatureImage || null,
+          driverSignaturePdfImage: driverSignaturePdfImage || null,
           remark
         }
       });

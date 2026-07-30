@@ -67,6 +67,53 @@ function isJsdomEnvironment() {
   return typeof window !== "undefined" && /jsdom/i.test(window.navigator.userAgent);
 }
 
+async function createPdfSignatureThumbnail(
+  dataUrl,
+  { maxWidth = 240, maxHeight = 96, quality = 0.76 } = {}
+) {
+  const source = String(dataUrl ?? "").trim();
+
+  if (!source || isJsdomEnvironment() || typeof document === "undefined") {
+    return source;
+  }
+
+  return new Promise((resolve) => {
+    const image = new Image();
+
+    image.onload = () => {
+      const sourceWidth = Math.max(image.naturalWidth || image.width || maxWidth, 1);
+      const sourceHeight = Math.max(image.naturalHeight || image.height || maxHeight, 1);
+      const scale = Math.min(maxWidth / sourceWidth, maxHeight / sourceHeight, 1);
+      const targetWidth = Math.max(Math.round(sourceWidth * scale), 1);
+      const targetHeight = Math.max(Math.round(sourceHeight * scale), 1);
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+
+      if (!context) {
+        resolve(source);
+        return;
+      }
+
+      canvas.width = maxWidth;
+      canvas.height = maxHeight;
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, maxWidth, maxHeight);
+      context.drawImage(
+        image,
+        Math.round((maxWidth - targetWidth) / 2),
+        Math.round((maxHeight - targetHeight) / 2),
+        targetWidth,
+        targetHeight
+      );
+
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+
+    image.onerror = () => resolve(source);
+    image.src = source;
+  });
+}
+
 function todayString() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -793,22 +840,6 @@ function BottomSheet({
   );
 }
 
-function SignaturePreviewSheet({ open, title, imageSrc, onClose }) {
-  if (!open || !imageSrc) {
-    return null;
-  }
-
-  return (
-    <BottomSheet open={open} title={title} ariaLabel={title} onClose={onClose}>
-      <div className="signature-preview-sheet">
-        <div className="signature-preview-sheet-frame">
-          <img alt={title} className="signature-preview-sheet-image" src={imageSrc} />
-        </div>
-      </div>
-    </BottomSheet>
-  );
-}
-
 function SignatureCanvas({
   value,
   onChange,
@@ -1269,7 +1300,6 @@ export function App() {
   const [selectedRecordIds, setSelectedRecordIds] = useState([]);
   const [expandedRecordId, setExpandedRecordId] = useState("");
   const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
-  const [previewSignatureRecord, setPreviewSignatureRecord] = useState(null);
   const [recordFilters, setRecordFilters] = useState({
     keyword: "",
     vehicleId: "",
@@ -1336,7 +1366,6 @@ export function App() {
     setPendingDeleteRecord(null);
     setExpandedRecordId("");
     setIsBulkDeleteOpen(false);
-    setPreviewSignatureRecord(null);
   }
 
   function resetPasswordModuleState() {
@@ -2062,6 +2091,8 @@ export function App() {
       return;
     }
 
+    const driverSignaturePdfImage = await createPdfSignatureThumbnail(driverSignatureImage);
+
     const response = await fetch("/api/records", {
       method: "POST",
       credentials: "include",
@@ -2083,6 +2114,7 @@ export function App() {
         fuelVolume: registryForm.fuelVolume.trim(),
         driverName,
         driverSignatureImage,
+        driverSignaturePdfImage,
         remark: registryForm.remark.trim()
       })
     });
@@ -3017,24 +3049,7 @@ export function App() {
                               <small>登记人：{resolveRecordRegistrantName(record)}</small>
                               <small>路线：{record.route}</small>
                               <small>加油：{formatFuelDisplay(record.fuelFee, record.fuelVolume)}</small>
-                              {record.driverSignatureImage ? (
-                                <div className="record-signature-preview">
-                                  <span>手写签字预览</span>
-                                  <button
-                                    aria-label={`放大查看${resolveRecordRegistrantName(record)}的手写签字`}
-                                    className="record-signature-preview-button"
-                                    type="button"
-                                    onClick={() =>
-                                      setPreviewSignatureRecord({
-                                        name: resolveRecordRegistrantName(record),
-                                        image: record.driverSignatureImage
-                                      })
-                                    }
-                                  >
-                                    <img alt={`${resolveRecordRegistrantName(record)}的手写签字`} src={record.driverSignatureImage} />
-                                  </button>
-                                </div>
-                              ) : null}
+                              <small>签字：{record.hasDriverSignature ?? Boolean(record.driverSignature) ? "已签字" : "未签字"}</small>
                               <small>
                                 {departureDateTime}-{returnDateTime} · {record.distance} 公里
                                 {record.isCrossDay ? " · 跨天" : ""}
@@ -3298,12 +3313,6 @@ export function App() {
         {...(deleteModalConfig ?? {})}
         open={Boolean(deleteModalConfig)}
         title={deleteModalConfig?.title ?? "确认删除"}
-      />
-      <SignaturePreviewSheet
-        open={Boolean(previewSignatureRecord)}
-        title={previewSignatureRecord ? `${previewSignatureRecord.name}的手写签字` : "手写签字预览"}
-        imageSrc={previewSignatureRecord?.image ?? ""}
-        onClose={() => setPreviewSignatureRecord(null)}
       />
     </main>
   );

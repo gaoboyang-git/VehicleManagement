@@ -1415,12 +1415,13 @@ describe("Issue 5 record management UI", () => {
     await user.click(within(recordSection).getByRole("button", { name: "查看记录 REC-001" }));
 
     expect(within(recordSection).getByText("加油：0元/0L")).toBeInTheDocument();
+    expect(within(recordSection).getByText("签字：已签字")).toBeInTheDocument();
     expect(within(recordSection).getByText("2026-07-20 09:00-2026-07-20 10:00 · 100 公里")).toBeInTheDocument();
     expect(within(recordSection).getByRole("button", { name: "删除记录 REC-001" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /编辑/ })).not.toBeInTheDocument();
   });
 
-  it("opens a larger signature preview from the record detail panel and closes it", async () => {
+  it("shows signature status in the record detail panel without exposing a signature preview", async () => {
     mockAdminRecordManagementFetch({
       users: [{ id: "admin-id", username: "admin", role: "admin", isBuiltinAdmin: true }],
       vehicles: [
@@ -1466,13 +1467,10 @@ describe("Issue 5 record management UI", () => {
 
     const recordSection = await screen.findByRole("region", { name: "用车记录管理" });
     await user.click(within(recordSection).getByRole("button", { name: "查看记录 签字预览" }));
-    await user.click(screen.getByRole("button", { name: "放大查看王麻子的手写签字" }));
 
-    expect(screen.getByRole("dialog", { name: "王麻子的手写签字" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "关闭王麻子的手写签字" }));
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "王麻子的手写签字" })).not.toBeInTheDocument();
-    });
+    expect(within(recordSection).getByText("签字：已签字")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "放大查看王麻子的手写签字" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "王麻子的手写签字" })).not.toBeInTheDocument();
   });
 
   it("formats legacy time-only records with full business dates in the expanded detail", async () => {
