@@ -1,146 +1,101 @@
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-
-import Database from "better-sqlite3";
 import { PrismaClient } from "@prisma/client";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-const rootDir = path.resolve(import.meta.dirname, "../..");
+import { createTestDatabase, runPrisma } from "../../test-support/mysqlTestDb.js";
 
-function run(command, args, databaseUrl) {
-  execFileSync(command, args, {
-    cwd: rootDir,
-    env: {
-      ...process.env,
-      DATABASE_URL: databaseUrl
-    },
-    stdio: "pipe"
+const activeDatabases = [];
+
+afterEach(async () => {
+  while (activeDatabases.length > 0) {
+    const { prisma, cleanup } = activeDatabases.pop();
+    await prisma?.$disconnect();
+    cleanup?.();
+  }
+});
+
+function createMigratedPrisma(prefix) {
+  const testDatabase = createTestDatabase(prefix);
+  runPrisma(["migrate", "deploy"], testDatabase.databaseUrl);
+
+  const prisma = new PrismaClient({
+    datasources: {
+      db: {
+        url: testDatabase.databaseUrl
+      }
+    }
   });
+
+  activeDatabases.push({
+    prisma,
+    cleanup: testDatabase.cleanup,
+    databaseUrl: testDatabase.databaseUrl
+  });
+
+  return {
+    prisma,
+    databaseUrl: testDatabase.databaseUrl
+  };
 }
 
-describe("Issue 0 database initialization", () => {
+describe("MySQL database initialization", () => {
   it(
     "creates the users table through migration and seeds exactly one builtin admin",
     async () => {
-      const tempDir = mkdtempSync(path.join(tmpdir(), "vehicle-db-"));
-      const databaseUrl = `file:${path.join(tempDir, "issue0.db")}`;
+      const { prisma, databaseUrl } = createMigratedPrisma("prisma_seed");
 
-      try {
-        run("npx", ["prisma", "migrate", "deploy"], databaseUrl);
-        run("npx", ["prisma", "db", "seed"], databaseUrl);
-        run("npx", ["prisma", "db", "seed"], databaseUrl);
+      runPrisma(["db", "seed"], databaseUrl);
+      runPrisma(["db", "seed"], databaseUrl);
 
-        const prisma = new PrismaClient({
-          datasources: {
-            db: {
-              url: databaseUrl
-            }
-          }
-        });
+      const admins = await prisma.user.findMany({
+        where: {
+          username: "admin",
+          role: "admin",
+          isBuiltinAdmin: true
+        }
+      });
 
-        const admins = await prisma.user.findMany({
-          where: {
-            username: "admin",
-            role: "admin",
-            isBuiltinAdmin: true
-          }
-        });
-
-        await prisma.$disconnect();
-
-        expect(admins).toHaveLength(1);
-        expect(admins[0].passwordHash.length).toBeGreaterThan(0);
-      } finally {
-        rmSync(tempDir, { force: true, recursive: true });
-      }
+      expect(admins).toHaveLength(1);
+      expect(admins[0].passwordHash.length).toBeGreaterThan(0);
     },
     60000
   );
-});
 
-describe("Issue 6 vehicle status database defaults", () => {
   it(
     "adds a vehicle status column that defaults to available for new rows",
     async () => {
-      const tempDir = mkdtempSync(path.join(tmpdir(), "vehicle-status-db-"));
-      const databaseUrl = `file:${path.join(tempDir, "issue6.db")}`;
+      const { prisma } = createMigratedPrisma("prisma_vehicle_status");
 
-      try {
-        run("npx", ["prisma", "migrate", "deploy"], databaseUrl);
+      const vehicle = await prisma.vehicle.create({
+        data: {
+          vehicleCode: "CAR-001",
+          plateNumber: "沪A-10001",
+          brandModel: "大众帕萨特"
+        }
+      });
 
-        const prisma = new PrismaClient({
-          datasources: {
-            db: {
-              url: databaseUrl
-            }
-          }
-        });
-
-        const vehicle = await prisma.vehicle.create({
-          data: {
-            vehicleCode: "CAR-001",
-            plateNumber: "沪A-10001",
-            brandModel: "大众帕萨特"
-          }
-        });
-
-        await prisma.$disconnect();
-
-        expect(vehicle.status).toBe("available");
-      } finally {
-        rmSync(tempDir, { force: true, recursive: true });
-      }
+      expect(vehicle.status).toBe("available");
     },
     60000
   );
-});
 
-describe("Issue 7 vehicle status migration", () => {
   it(
-    "migrates legacy idle vehicle rows to inUse",
+    "tracks the applied MySQL migration in the Prisma metadata table",
     async () => {
-      const tempDir = mkdtempSync(path.join(tmpdir(), "vehicle-status-migration-"));
-      const databasePath = path.join(tempDir, "issue7.db");
-      const database = new Database(databasePath);
+      const { prisma } = createMigratedPrisma("prisma_migrations");
 
-      try {
-        database.exec(`
-          CREATE TABLE "Vehicle" (
-            "id" TEXT NOT NULL PRIMARY KEY,
-            "vehicleCode" TEXT NOT NULL,
-            "plateNumber" TEXT NOT NULL,
-            "brandModel" TEXT NOT NULL,
-            "status" TEXT NOT NULL DEFAULT 'available',
-            "isDeleted" BOOLEAN NOT NULL DEFAULT false,
-            "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-          );
+      const appliedMigrations = await prisma.$queryRaw`
+        SELECT migration_name
+        FROM _prisma_migrations
+        ORDER BY finished_at DESC
+      `;
 
-          INSERT INTO "Vehicle" ("id", "vehicleCode", "plateNumber", "brandModel", "status")
-          VALUES ('vehicle-1', 'CAR-001', '沪A-10001', '大众帕萨特', 'idle');
-        `);
-
-        const migrationSql = readFileSync(
-          path.join(
-            rootDir,
-            "prisma/migrations/20260724000100_issue_7_vehicle_inuse_status/migration.sql"
-          ),
-          "utf8"
-        );
-
-        database.exec(migrationSql);
-
-        const migratedVehicle = database
-          .prepare(`SELECT "status" FROM "Vehicle" WHERE "id" = 'vehicle-1'`)
-          .get();
-
-        expect(migratedVehicle.status).toBe("inUse");
-      } finally {
-        database.close();
-        rmSync(tempDir, { force: true, recursive: true });
-      }
+      expect(appliedMigrations).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            migration_name: expect.stringContaining("init_mysql_core")
+          })
+        ])
+      );
     },
     60000
   );

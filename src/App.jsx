@@ -159,6 +159,10 @@ function normalizeRecords(payload) {
   return Array.isArray(payload?.records) ? payload.records : [];
 }
 
+function normalizeOperationLogs(payload) {
+  return Array.isArray(payload?.logs) ? payload.logs : [];
+}
+
 function readRequiredText(value) {
   return String(value ?? "").trim();
 }
@@ -277,6 +281,14 @@ function sortRecordsDescending(records) {
   return [...records].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
+function sortOperationLogsDescending(logs) {
+  return [...logs].sort((left, right) => {
+    const leftTime = String(left?.operatedAt ?? left?.createdAt ?? "");
+    const rightTime = String(right?.operatedAt ?? right?.createdAt ?? "");
+    return rightTime.localeCompare(leftTime);
+  });
+}
+
 async function readApiMessage(response) {
   const clone = typeof response?.clone === "function" ? response.clone() : response;
   const body = await clone.json().catch(() => null);
@@ -338,6 +350,32 @@ function resolveRecordRegistrantName(record) {
     readRequiredText(record?.registrantUsername) ||
     readRequiredText(record?.driverSignature)
   );
+}
+
+function resolveOperationLogOperatorName(log) {
+  return readRequiredText(log?.operatorName) || readRequiredText(log?.operatorUsername) || "系统";
+}
+
+function formatOperationLogDateTime(value) {
+  const text = String(value ?? "").trim();
+
+  if (!text) {
+    return "-";
+  }
+
+  return text.replace("T", " ").slice(0, 19);
+}
+
+function formatOperationLogPayload(value) {
+  if (value === null || value === undefined) {
+    return "无";
+  }
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 function getVehicleUsageStatus(vehicle) {
@@ -1248,6 +1286,7 @@ export function App() {
   const adminUsersView = "adminUsers";
   const adminVehiclesView = "adminVehicles";
   const adminRecordsView = "adminRecords";
+  const adminLogsView = "adminLogs";
   const adminPasswordView = "adminPassword";
 
   const [user, setUser] = useState(null);
@@ -1265,6 +1304,7 @@ export function App() {
   const [view, setView] = useState(employeeRegistryView);
   const [managedUsers, setManagedUsers] = useState([]);
   const [managedRecords, setManagedRecords] = useState([]);
+  const [managedOperationLogs, setManagedOperationLogs] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
   const [registryForm, setRegistryForm] = useState(() => createEmptyRegistryForm());
@@ -1299,6 +1339,7 @@ export function App() {
   const [pendingDeleteRecord, setPendingDeleteRecord] = useState(null);
   const [selectedRecordIds, setSelectedRecordIds] = useState([]);
   const [expandedRecordId, setExpandedRecordId] = useState("");
+  const [expandedOperationLogId, setExpandedOperationLogId] = useState("");
   const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
   const [recordFilters, setRecordFilters] = useState({
     keyword: "",
@@ -1306,6 +1347,15 @@ export function App() {
     vehicleCode: "",
     registrantUsername: "",
     businessDate: ""
+  });
+  const [operationLogFilters, setOperationLogFilters] = useState({
+    keyword: "",
+    module: "",
+    action: "",
+    operatorUserId: "",
+    resultStatus: "",
+    dateFrom: "",
+    dateTo: ""
   });
   const selectedVehicle = vehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? null;
   const selectedVehicleUsageStatus = getVehicleUsageStatus(selectedVehicle);
@@ -1365,6 +1415,7 @@ export function App() {
     setPendingVehicleStatusChange(null);
     setPendingDeleteRecord(null);
     setExpandedRecordId("");
+    setExpandedOperationLogId("");
     setIsBulkDeleteOpen(false);
   }
 
@@ -1474,6 +1525,27 @@ export function App() {
     });
   }
 
+  function updateOperationLogFilter(field, value) {
+    setExpandedOperationLogId("");
+    setOperationLogFilters((current) => ({
+      ...current,
+      [field]: value
+    }));
+  }
+
+  function clearOperationLogFilters() {
+    setExpandedOperationLogId("");
+    setOperationLogFilters({
+      keyword: "",
+      module: "",
+      action: "",
+      operatorUserId: "",
+      resultStatus: "",
+      dateFrom: "",
+      dateTo: ""
+    });
+  }
+
   async function loadVehicles({ preserveSelection = true } = {}) {
     const response = await fetch("/api/vehicles", {
       credentials: "include"
@@ -1517,6 +1589,23 @@ export function App() {
 
     setManagedRecords(nextRecords);
     return nextRecords;
+  }
+
+  async function loadOperationLogs() {
+    const response = await fetch("/api/operation-logs", {
+      credentials: "include"
+    });
+
+    if (!response.ok) {
+      setManagedOperationLogs([]);
+      return [];
+    }
+
+    const body = await response.json();
+    const nextLogs = normalizeOperationLogs(body);
+
+    setManagedOperationLogs(nextLogs);
+    return nextLogs;
   }
 
   async function handleExportRecords() {
@@ -1740,6 +1829,24 @@ export function App() {
     setManagedRecords(normalizeRecords(body));
     clearRecordFilters();
     setView(adminRecordsView);
+  }
+
+  async function openAdminOperationLogs() {
+    resetAdminModuleState();
+
+    const response = await fetch("/api/operation-logs", {
+      credentials: "include"
+    });
+
+    if (!response.ok) {
+      setUserManagementMessage(createBannerMessage(await readApiMessage(response)));
+      return;
+    }
+
+    const body = await response.json();
+    setManagedOperationLogs(normalizeOperationLogs(body));
+    clearOperationLogFilters();
+    setView(adminLogsView);
   }
 
   function openAdminPasswordModule() {
@@ -2198,6 +2305,62 @@ export function App() {
   const areAllFilteredRecordsSelected =
     filteredManagedRecords.length > 0 &&
     filteredManagedRecords.every((record) => selectedRecordIds.includes(record.id));
+  const filteredManagedOperationLogs = sortOperationLogsDescending(managedOperationLogs).filter((log) => {
+    const keyword = operationLogFilters.keyword.trim().toLowerCase();
+    const matchesKeyword = keyword
+      ? [
+          log.module,
+          log.bizType,
+          log.bizId ?? "",
+          log.action,
+          resolveOperationLogOperatorName(log),
+          log.operatorUsername ?? "",
+          log.requestPath ?? "",
+          log.requestMethod ?? "",
+          log.requestIp ?? "",
+          log.resultStatus,
+          log.errorMessage ?? ""
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(keyword)
+      : true;
+    const operatedDate = String(log.operatedAt ?? "").slice(0, 10);
+    const matchesModule = operationLogFilters.module ? log.module === operationLogFilters.module : true;
+    const matchesAction = operationLogFilters.action ? log.action === operationLogFilters.action : true;
+    const matchesOperator = operationLogFilters.operatorUserId
+      ? log.operatorUserId === operationLogFilters.operatorUserId
+      : true;
+    const matchesStatus = operationLogFilters.resultStatus
+      ? log.resultStatus === operationLogFilters.resultStatus
+      : true;
+    const matchesDateFrom = operationLogFilters.dateFrom ? operatedDate >= operationLogFilters.dateFrom : true;
+    const matchesDateTo = operationLogFilters.dateTo ? operatedDate <= operationLogFilters.dateTo : true;
+
+    return (
+      matchesKeyword &&
+      matchesModule &&
+      matchesAction &&
+      matchesOperator &&
+      matchesStatus &&
+      matchesDateFrom &&
+      matchesDateTo
+    );
+  });
+  const operationLogModuleOptions = [...new Set(managedOperationLogs.map((log) => log.module).filter(Boolean))];
+  const operationLogActionOptions = [...new Set(managedOperationLogs.map((log) => log.action).filter(Boolean))];
+  const operationLogOperatorOptions = Array.from(
+    managedOperationLogs.reduce((options, log) => {
+      if (log.operatorUserId && !options.has(log.operatorUserId)) {
+        options.set(log.operatorUserId, {
+          operatorUserId: log.operatorUserId,
+          operatorName: resolveOperationLogOperatorName(log)
+        });
+      }
+
+      return options;
+    }, new Map()).values()
+  );
   const deleteModalConfig = pendingDeleteUser
     ? {
         title: "确认删除",
@@ -2659,6 +2822,15 @@ export function App() {
                 </span>
                 <AppIcon name="chevronRight" className="module-nav-chevron" />
               </button>
+              <button className="module-nav-card" type="button" onClick={openAdminOperationLogs}>
+                <span className="module-nav-icon">
+                  <AssetIcon name="shield" />
+                </span>
+                <span className="module-nav-copy">
+                  <strong>操作日志</strong>
+                </span>
+                <AppIcon name="chevronRight" className="module-nav-chevron" />
+              </button>
               <button className="module-nav-card" type="button" onClick={openAdminPasswordModule}>
                 <span className="module-nav-icon">
                   <AssetIcon name="adminPassword" />
@@ -2693,6 +2865,8 @@ export function App() {
                     ? "公车档案管理"
                     : view === adminRecordsView
                       ? "用车记录管理"
+                      : view === adminLogsView
+                        ? "操作日志"
                       : "修改密码"}
               </h1>
             </div>
@@ -3071,6 +3245,160 @@ export function App() {
                               </button>
                             </div>
                           ) : null}
+                      </article>
+                    );
+                  })}
+                </div>
+              </section>
+            ) : null}
+
+            {view === adminLogsView ? (
+              <section className="management-panel" aria-label="操作日志">
+                <p className="module-count">共 {filteredManagedOperationLogs.length} 条日志</p>
+                <BannerMessage message={userManagementMessage} />
+
+                <section className="sheet-card filter-card">
+                  <div className="filter-grid filter-grid-logs">
+                    <label className="field field-span-2">
+                      <span>搜索日志</span>
+                      <input
+                        aria-label="搜索日志"
+                        placeholder="搜索模块、动作、操作人、路径..."
+                        value={operationLogFilters.keyword}
+                        onChange={(event) => updateOperationLogFilter("keyword", event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>按模块筛选</span>
+                      <select
+                        aria-label="按模块筛选"
+                        value={operationLogFilters.module}
+                        onChange={(event) => updateOperationLogFilter("module", event.target.value)}
+                      >
+                        <option value="">全部模块</option>
+                        {operationLogModuleOptions.map((module) => (
+                          <option key={module} value={module}>
+                            {module}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>按动作筛选</span>
+                      <select
+                        aria-label="按动作筛选"
+                        value={operationLogFilters.action}
+                        onChange={(event) => updateOperationLogFilter("action", event.target.value)}
+                      >
+                        <option value="">全部动作</option>
+                        {operationLogActionOptions.map((action) => (
+                          <option key={action} value={action}>
+                            {action}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>按操作人筛选</span>
+                      <select
+                        aria-label="按操作人筛选"
+                        value={operationLogFilters.operatorUserId}
+                        onChange={(event) => updateOperationLogFilter("operatorUserId", event.target.value)}
+                      >
+                        <option value="">全部操作人</option>
+                        {operationLogOperatorOptions.map((operator) => (
+                          <option key={operator.operatorUserId} value={operator.operatorUserId}>
+                            {operator.operatorName}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>按结果筛选</span>
+                      <select
+                        aria-label="按结果筛选"
+                        value={operationLogFilters.resultStatus}
+                        onChange={(event) => updateOperationLogFilter("resultStatus", event.target.value)}
+                      >
+                        <option value="">全部结果</option>
+                        <option value="success">成功</option>
+                        <option value="failed">失败</option>
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>开始日期</span>
+                      <input
+                        aria-label="开始日期"
+                        type="date"
+                        value={operationLogFilters.dateFrom}
+                        onChange={(event) => updateOperationLogFilter("dateFrom", event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>结束日期</span>
+                      <input
+                        aria-label="结束日期"
+                        type="date"
+                        value={operationLogFilters.dateTo}
+                        onChange={(event) => updateOperationLogFilter("dateTo", event.target.value)}
+                      />
+                    </label>
+                  </div>
+                  <button className="filter-clear-button" type="button" onClick={clearOperationLogFilters}>
+                    清空筛选
+                  </button>
+                </section>
+
+                <div className="entity-list record-list">
+                  {filteredManagedOperationLogs.length === 0 ? (
+                    <div className="empty-state empty-state-card">
+                      <span className="empty-state-icon">
+                        <AssetIcon name="emptyFile" />
+                      </span>
+                      <p>暂无符合条件的日志</p>
+                    </div>
+                  ) : null}
+                  {filteredManagedOperationLogs.map((log) => {
+                    const isExpanded = expandedOperationLogId === log.id;
+
+                    return (
+                      <article className={`record-card ${isExpanded ? "record-card-expanded" : ""}`} key={log.id}>
+                        <button
+                          aria-expanded={isExpanded}
+                          aria-label={`查看日志 ${log.module} ${log.action}`}
+                          className="record-summary-button"
+                          type="button"
+                          onClick={() => {
+                            setUserManagementMessage(null);
+                            setExpandedOperationLogId((current) => (current === log.id ? "" : log.id));
+                          }}
+                        >
+                          <span className="record-card-copy">
+                            <span className="record-card-heading">
+                              <strong>{log.module}</strong>
+                              <span>·</span>
+                              <strong>{log.action}</strong>
+                            </span>
+                            <span className="record-card-summary">
+                              {resolveOperationLogOperatorName(log)} · {formatOperationLogDateTime(log.operatedAt)}
+                            </span>
+                          </span>
+                          <AppIcon name="chevronRight" className="record-card-chevron" />
+                        </button>
+                        {isExpanded ? (
+                          <div className="record-detail-panel">
+                            <small>操作人：{resolveOperationLogOperatorName(log)}</small>
+                            <small>结果：{log.resultStatus === "success" ? "成功" : "失败"}</small>
+                            <small>模块/动作：{log.module} / {log.action}</small>
+                            <small>业务类型/编号：{log.bizType || "-"} / {log.bizId || "-"}</small>
+                            <small>请求：{log.requestMethod || "-"} {log.requestPath || "-"}</small>
+                            <small>IP：{log.requestIp || "-"}</small>
+                            <small>时间：{formatOperationLogDateTime(log.operatedAt)}</small>
+                            {log.errorMessage ? <small>错误：{log.errorMessage}</small> : null}
+                            <small className="log-detail-code">前数据：{formatOperationLogPayload(log.beforeData)}</small>
+                            <small className="log-detail-code">后数据：{formatOperationLogPayload(log.afterData)}</small>
+                          </div>
+                        ) : null}
                       </article>
                     );
                   })}

@@ -446,6 +446,27 @@ function mockAdminRecordManagementFetch({
   });
 }
 
+function mockOperationLogManagementFetch({
+  loginUser = { username: "admin", role: "admin" },
+  logs = []
+} = {}) {
+  return mockFetch((url, options = {}) => {
+    const requestUrl = parseMockUrl(url);
+    const pathname = requestUrl.pathname;
+    const method = options.method ?? "GET";
+
+    if (pathname === "/api/login") {
+      return okJson({ user: loginUser });
+    }
+
+    if (pathname === "/api/operation-logs" && method === "GET") {
+      return okJson({ logs });
+    }
+
+    return failJson(404, { message: "not found" });
+  });
+}
+
 describe("Issue 1 authentication UI", () => {
   afterEach(() => {
     cleanup();
@@ -512,6 +533,7 @@ describe("Issue 1 authentication UI", () => {
     expect(screen.getByRole("button", { name: "用户账号管理" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "公车档案管理" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "用车记录管理" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "操作日志" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "修改密码" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "查看全部" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "提交登记" })).not.toBeInTheDocument();
@@ -1894,5 +1916,125 @@ describe("Issue 5 record management UI", () => {
     expect(clickSpy).toHaveBeenCalledTimes(1);
     expect(clickSpy.mock.instances[0].download).toMatch(/^用车记录-\d{4}年\d{2}月\d{2}日\.pdf$/);
     expect(revokeObjectUrlSpy).toHaveBeenCalledWith("blob:records");
+  });
+});
+
+describe("Issue 6 operation log UI", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  async function loginAsAdminAndOpenLogs(user) {
+    await user.type(screen.getByLabelText("账号"), "admin");
+    await user.type(screen.getByLabelText("密码"), "admin");
+    await user.click(screen.getByRole("button", { name: "登录" }));
+    await user.click(await screen.findByRole("button", { name: "操作日志" }));
+  }
+
+  it("opens the operation log module and expands a log to show audit details", async () => {
+    mockOperationLogManagementFetch({
+      logs: [
+        {
+          id: "log-1",
+          module: "user",
+          bizType: "user",
+          bizId: "user-1",
+          action: "delete",
+          operatorUserId: "admin-id",
+          operatorUsername: "admin",
+          operatorName: "系统管理员",
+          requestPath: "/api/users/user-1",
+          requestMethod: "DELETE",
+          requestIp: "127.0.0.1",
+          resultStatus: "failed",
+          errorMessage: "不能删除当前登录管理员账号",
+          beforeData: { username: "manager" },
+          afterData: null,
+          operatedAt: "2026-08-05T10:30:00.000Z",
+          createdAt: "2026-08-05T10:30:00.000Z"
+        }
+      ]
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+    await loginAsAdminAndOpenLogs(user);
+
+    expect(await screen.findByRole("heading", { name: "操作日志" })).toBeInTheDocument();
+    expect(screen.getByText("共 1 条日志")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "查看日志 user delete" }));
+
+    expect(screen.getByText("操作人：系统管理员")).toBeInTheDocument();
+    expect(screen.getByText("结果：失败")).toBeInTheDocument();
+    expect(screen.getByText(/请求：DELETE \/api\/users\/user-1/)).toBeInTheDocument();
+    expect(screen.getByText(/错误：不能删除当前登录管理员账号/)).toBeInTheDocument();
+    expect(screen.getByText(/前数据：/)).toBeInTheDocument();
+  });
+
+  it("filters operation logs by keyword, module, operator, result, and date range", async () => {
+    mockOperationLogManagementFetch({
+      logs: [
+        {
+          id: "log-1",
+          module: "user",
+          bizType: "user",
+          bizId: "user-1",
+          action: "delete",
+          operatorUserId: "admin-id",
+          operatorUsername: "admin",
+          operatorName: "系统管理员",
+          requestPath: "/api/users/user-1",
+          requestMethod: "DELETE",
+          requestIp: "127.0.0.1",
+          resultStatus: "failed",
+          errorMessage: "不能删除当前登录管理员账号",
+          beforeData: { username: "manager" },
+          afterData: null,
+          operatedAt: "2026-08-05T10:30:00.000Z",
+          createdAt: "2026-08-05T10:30:00.000Z"
+        },
+        {
+          id: "log-2",
+          module: "vehicle",
+          bizType: "vehicle",
+          bizId: "CAR-001",
+          action: "create",
+          operatorUserId: "manager-id",
+          operatorUsername: "manager",
+          operatorName: "车队管理员",
+          requestPath: "/api/vehicles",
+          requestMethod: "POST",
+          requestIp: "127.0.0.2",
+          resultStatus: "success",
+          errorMessage: null,
+          beforeData: null,
+          afterData: { vehicleCode: "CAR-001" },
+          operatedAt: "2026-08-04T09:00:00.000Z",
+          createdAt: "2026-08-04T09:00:00.000Z"
+        }
+      ]
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+    await loginAsAdminAndOpenLogs(user);
+
+    await user.type(screen.getByLabelText("搜索日志"), "管理员账号");
+    await user.selectOptions(screen.getByLabelText("按模块筛选"), "user");
+    await user.selectOptions(screen.getByLabelText("按动作筛选"), "delete");
+    await user.selectOptions(screen.getByLabelText("按操作人筛选"), "admin-id");
+    await user.selectOptions(screen.getByLabelText("按结果筛选"), "failed");
+    fireEvent.change(screen.getByLabelText("开始日期"), {
+      target: { value: "2026-08-05" }
+    });
+    fireEvent.change(screen.getByLabelText("结束日期"), {
+      target: { value: "2026-08-05" }
+    });
+
+    expect(await screen.findByText("共 1 条日志")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "查看日志 user delete" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "查看日志 vehicle create" })).not.toBeInTheDocument();
   });
 });

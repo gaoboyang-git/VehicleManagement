@@ -2920,6 +2920,14 @@ body,
   gap: 12px;
 }
 
+.filter-grid-logs {
+  gap: 12px;
+}
+
+.filter-grid-logs .field span {
+  display: block;
+}
+
 .filter-grid-records .field input,
 .filter-grid-records .field select {
   min-height: 40px;
@@ -3027,6 +3035,12 @@ body,
 .record-detail-panel small {
   font-size: 12px;
   line-height: 18px;
+}
+
+.log-detail-code {
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .bottom-sheet {

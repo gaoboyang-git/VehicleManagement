@@ -1,27 +1,10 @@
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { createApp, createSessionStore } from "../src/app.js";
-
-const rootDir = path.resolve(import.meta.dirname, "../..");
-
-function runPrisma(args, databaseUrl) {
-  execFileSync("npx", ["prisma", ...args], {
-    cwd: rootDir,
-    env: {
-      ...process.env,
-      DATABASE_URL: databaseUrl
-    },
-    stdio: "pipe"
-  });
-}
+import { createApp } from "../src/app.js";
+import { createTestDatabase, runPrisma } from "../../test-support/mysqlTestDb.js";
 
 async function createUser(prisma, { username, password, role, isBuiltinAdmin = false }) {
   await prisma.user.create({
@@ -47,25 +30,26 @@ async function createVehicle(prisma, { vehicleCode, plateNumber, brandModel, sta
 }
 
 describe("Issue 3 vehicle management API", () => {
-  let tempDir;
+  let testDatabase;
   let prisma;
   let app;
 
   beforeAll(() => {
-    tempDir = mkdtempSync(path.join(tmpdir(), "vehicle-api-"));
-    const databaseUrl = `file:${path.join(tempDir, "vehicles.db")}`;
-    runPrisma(["migrate", "deploy"], databaseUrl);
+    testDatabase = createTestDatabase("vehicle_api");
+    runPrisma(["migrate", "deploy"], testDatabase.databaseUrl);
     prisma = new PrismaClient({
       datasources: {
         db: {
-          url: databaseUrl
+          url: testDatabase.databaseUrl
         }
       }
     });
-    app = createApp({ prisma, sessionStore: createSessionStore() });
+    app = createApp({ prisma });
   }, 30000);
 
   beforeEach(async () => {
+    await prisma.operationLog.deleteMany();
+    await prisma.session.deleteMany();
     await prisma.vehicle.deleteMany();
     await prisma.user.deleteMany();
     await createUser(prisma, {
@@ -88,9 +72,7 @@ describe("Issue 3 vehicle management API", () => {
 
   afterAll(async () => {
     await prisma?.$disconnect();
-    if (tempDir) {
-      rmSync(tempDir, { force: true, recursive: true });
-    }
+    testDatabase?.cleanup();
   });
 
   async function adminAgent() {
@@ -134,6 +116,11 @@ describe("Issue 3 vehicle management API", () => {
 
   it("creates a vehicle with a default status and rejects duplicate vehicle code or plate number", async () => {
     const agent = await adminAgent();
+    const admin = await prisma.user.findUnique({
+      where: {
+        username: "admin"
+      }
+    });
 
     const created = await agent.post("/api/vehicles").send({
       vehicleCode: "CAR-002",
@@ -159,6 +146,25 @@ describe("Issue 3 vehicle management API", () => {
       status: "available",
       isDeleted: false
     }));
+    const storedVehicle = await prisma.vehicle.findUnique({
+      where: {
+        id: created.body.vehicle.id
+      }
+    });
+    expect(storedVehicle).toEqual(expect.objectContaining({
+      createdBy: admin.id,
+      updatedBy: admin.id,
+      deletedAt: null,
+      deletedBy: null
+    }));
+    expect(await prisma.operationLog.findFirst({
+      where: {
+        module: "vehicle",
+        bizType: "vehicle",
+        action: "create",
+        bizId: created.body.vehicle.id
+      }
+    })).toBeTruthy();
     expect(duplicateCode.status).toBe(409);
     expect(duplicateCode.body).toEqual({ message: "车辆编号已存在" });
     expect(duplicatePlate.status).toBe(409);
@@ -207,6 +213,14 @@ describe("Issue 3 vehicle management API", () => {
       id: created.body.vehicle.id,
       status: "available"
     }));
+    expect(await prisma.operationLog.findFirst({
+      where: {
+        module: "vehicle",
+        bizType: "vehicle",
+        action: "update_status",
+        bizId: created.body.vehicle.id
+      }
+    })).toBeTruthy();
   });
 
   it("rejects invalid vehicle status changes and blocks employees from updating status", async () => {
@@ -225,6 +239,11 @@ describe("Issue 3 vehicle management API", () => {
 
   it("soft deletes a vehicle so it disappears from active vehicle lists", async () => {
     const agent = await adminAgent();
+    const admin = await prisma.user.findUnique({
+      where: {
+        username: "admin"
+      }
+    });
     const vehicle = await prisma.vehicle.findUnique({
       where: {
         vehicleCode: "CAR-001"
@@ -240,7 +259,21 @@ describe("Issue 3 vehicle management API", () => {
     });
     const listResponse = await agent.get("/api/vehicles");
 
-    expect(storedVehicle.isDeleted).toBe(true);
+    expect(storedVehicle).toEqual(expect.objectContaining({
+      id: vehicle.id,
+      isDeleted: true,
+      deletedBy: admin.id,
+      updatedBy: admin.id
+    }));
+    expect(storedVehicle.deletedAt).toBeTruthy();
     expect(listResponse.body.vehicles).toEqual([]);
+    expect(await prisma.operationLog.findFirst({
+      where: {
+        module: "vehicle",
+        bizType: "vehicle",
+        action: "delete",
+        bizId: vehicle.id
+      }
+    })).toBeTruthy();
   });
 });

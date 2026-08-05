@@ -1,29 +1,17 @@
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { PDFDocument } from "pdf-lib";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { createApp, createSessionStore } from "../src/app.js";
-
-const rootDir = path.resolve(import.meta.dirname, "../..");
+import { createApp } from "../src/app.js";
+import { createTestDatabase, runPrisma } from "../../test-support/mysqlTestDb.js";
 const pdfExportTestTimeout = 15_000;
-
-function runPrisma(args, databaseUrl) {
-  execFileSync("npx", ["prisma", ...args], {
-    cwd: rootDir,
-    env: {
-      ...process.env,
-      DATABASE_URL: databaseUrl
-    },
-    stdio: "pipe"
-  });
-}
+const LONG_SIGNATURE_DATA_URL = `data:image/png;base64,${"A".repeat(1024)}`;
+const LONG_SIGNATURE_PDF_DATA_URL = `data:image/jpeg;base64,${"B".repeat(1024)}`;
+const VALID_SIGNATURE_PNG_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg==";
+const INVALID_SIGNATURE_JPEG_DATA_URL = "data:image/jpeg;base64,AAAA";
 
 function getBinaryResponse(agent, path) {
   return agent.get(path).buffer(true).parse((res, callback) => {
@@ -73,6 +61,8 @@ async function createRecord(
     distance = 100,
     isCrossDay = false,
     driverSignature = "张三",
+    driverSignatureImage = null,
+    driverSignaturePdfImage = null,
     fuelFee = "0",
     fuelVolume = "0",
     remark = "",
@@ -92,6 +82,8 @@ async function createRecord(
     distance,
     isCrossDay,
     driverSignature,
+    driverSignatureImage,
+    driverSignaturePdfImage,
     fuelFee,
     fuelVolume,
     remark
@@ -112,25 +104,26 @@ async function readPdfPageCount(buffer) {
 }
 
 describe("Issue 4 registry API", () => {
-  let tempDir;
+  let testDatabase;
   let prisma;
   let app;
 
   beforeAll(() => {
-    tempDir = mkdtempSync(path.join(tmpdir(), "vehicle-records-"));
-    const databaseUrl = `file:${path.join(tempDir, "records.db")}`;
-    runPrisma(["migrate", "deploy"], databaseUrl);
+    testDatabase = createTestDatabase("vehicle_records");
+    runPrisma(["migrate", "deploy"], testDatabase.databaseUrl);
     prisma = new PrismaClient({
       datasources: {
         db: {
-          url: databaseUrl
+          url: testDatabase.databaseUrl
         }
       }
     });
-    app = createApp({ prisma, sessionStore: createSessionStore() });
+    app = createApp({ prisma });
   }, 30000);
 
   beforeEach(async () => {
+    await prisma.operationLog.deleteMany();
+    await prisma.session.deleteMany();
     await prisma.vehicleUseRecord.deleteMany();
     await prisma.vehicle.deleteMany();
     await prisma.user.deleteMany();
@@ -150,9 +143,7 @@ describe("Issue 4 registry API", () => {
 
   afterAll(async () => {
     await prisma?.$disconnect();
-    if (tempDir) {
-      rmSync(tempDir, { force: true, recursive: true });
-    }
+    testDatabase?.cleanup();
   });
 
   async function adminAgent() {
@@ -274,6 +265,14 @@ describe("Issue 4 registry API", () => {
         fuelVolume: "20.25"
       })
     );
+    expect(await prisma.operationLog.findFirst({
+      where: {
+        module: "record",
+        bizType: "vehicle_use_record",
+        action: "create",
+        bizId: response.body.record.id
+      }
+    })).toBeTruthy();
     expect(storedRecord).toEqual(
       expect.objectContaining({
         vehicleId: vehicle.id,
@@ -292,6 +291,11 @@ describe("Issue 4 registry API", () => {
   });
 
   it("allows registry submits when the selected vehicle is in use", async () => {
+    const employee = await prisma.user.findUnique({
+      where: {
+        username: "employee"
+      }
+    });
     const vehicle = await createVehicle(prisma, {
       vehicleCode: "CAR-001",
       plateNumber: "沪A-10001",
@@ -323,7 +327,65 @@ describe("Issue 4 registry API", () => {
         isCrossDay: false
       })
     );
-    expect(await prisma.vehicleUseRecord.count()).toBe(1);
+    const storedRecord = await prisma.vehicleUseRecord.findFirst({
+      where: {
+        vehicleId: vehicle.id,
+        userId: employee.id
+      }
+    });
+    expect(storedRecord).toEqual(expect.objectContaining({
+      createdBy: employee.id,
+      updatedBy: employee.id,
+      deletedAt: null,
+      deletedBy: null
+    }));
+    expect(await prisma.vehicleUseRecord.count({
+      where: {
+        deletedAt: null
+      }
+    })).toBe(1);
+  });
+
+  it("stores longer signature images in MySQL when an employee submits a record", async () => {
+    const employee = await prisma.user.findUnique({
+      where: {
+        username: "employee"
+      }
+    });
+    const vehicle = await createVehicle(prisma, {
+      vehicleCode: "CAR-088",
+      plateNumber: "沪A-10888",
+      brandModel: "比亚迪汉"
+    });
+    const agent = await employeeAgent();
+
+    const response = await agent.post("/api/records").send({
+      vehicleId: vehicle.id,
+      businessDate: "2026-08-05",
+      departureTime: "09:00",
+      returnTime: "10:00",
+      reason: "外出办事",
+      route: "园区-政务大厅",
+      startMileage: 1200,
+      endMileage: 1230,
+      driverSignature: "张三",
+      driverSignatureImage: LONG_SIGNATURE_DATA_URL,
+      driverSignaturePdfImage: LONG_SIGNATURE_PDF_DATA_URL,
+      fuelFee: "5",
+      fuelVolume: "5",
+      remark: ""
+    });
+
+    const storedRecord = await prisma.vehicleUseRecord.findFirst({
+      where: {
+        vehicleId: vehicle.id,
+        userId: employee.id
+      }
+    });
+
+    expect(response.status).toBe(201);
+    expect(storedRecord.driverSignatureImage).toBe(LONG_SIGNATURE_DATA_URL);
+    expect(storedRecord.driverSignaturePdfImage).toBe(LONG_SIGNATURE_PDF_DATA_URL);
   });
 
   it("lets an administrator submit a cross-day registry record with explicit next-day datetime values", async () => {
@@ -899,10 +961,19 @@ describe("Issue 4 registry API", () => {
 
     await agent.get("/api/records").expect(403);
     await agent.delete(`/api/records/${record.id}`).expect(403);
-    expect(await prisma.vehicleUseRecord.count()).toBe(1);
+    expect(await prisma.vehicleUseRecord.count({
+      where: {
+        deletedAt: null
+      }
+    })).toBe(1);
   });
 
   it("deletes the latest record and recalculates the vehicle default start mileage from remaining records", async () => {
+    const admin = await prisma.user.findUnique({
+      where: {
+        username: "admin"
+      }
+    });
     const employee = await prisma.user.findUnique({
       where: {
         username: "employee"
@@ -942,13 +1013,41 @@ describe("Issue 4 registry API", () => {
     const listResponse = await agent.get("/api/records");
 
     expect(deleteResponse.status).toBe(204);
-    expect(await prisma.vehicleUseRecord.count()).toBe(1);
+    const deletedRecord = await prisma.vehicleUseRecord.findUnique({
+      where: {
+        id: latestRecord.id
+      }
+    });
+    expect(deletedRecord).toEqual(expect.objectContaining({
+      id: latestRecord.id,
+      deletedBy: admin.id,
+      updatedBy: admin.id
+    }));
+    expect(deletedRecord.deletedAt).toBeTruthy();
+    expect(await prisma.vehicleUseRecord.count({
+      where: {
+        deletedAt: null
+      }
+    })).toBe(1);
+    expect(await prisma.operationLog.findFirst({
+      where: {
+        module: "record",
+        bizType: "vehicle_use_record",
+        action: "delete",
+        bizId: latestRecord.id
+      }
+    })).toBeTruthy();
     expect(latestMileageResponse.status).toBe(200);
     expect(latestMileageResponse.body).toEqual({ startMileage: 900 });
     expect(listResponse.body.records.map((record) => record.reason)).toEqual(["REC-OLD"]);
   });
 
   it("batch deletes selected records and rejects empty selections", async () => {
+    const admin = await prisma.user.findUnique({
+      where: {
+        username: "admin"
+      }
+    });
     const employee = await prisma.user.findUnique({
       where: {
         username: "employee"
@@ -1003,7 +1102,38 @@ describe("Issue 4 registry API", () => {
 
     expect(deleteResponse.status).toBe(200);
     expect(deleteResponse.body).toEqual({ message: "已删除 2 条记录", deletedCount: 2 });
-    expect(await prisma.vehicleUseRecord.count()).toBe(1);
+    expect(await prisma.vehicleUseRecord.count({
+      where: {
+        deletedAt: null
+      }
+    })).toBe(1);
+    const softDeletedRecords = await prisma.vehicleUseRecord.findMany({
+      where: {
+        id: {
+          in: [latestA.id, deleteB.id]
+        }
+      },
+      orderBy: {
+        id: "asc"
+      }
+    });
+    expect(softDeletedRecords).toHaveLength(2);
+    expect(softDeletedRecords.every((record) =>
+      record.deletedAt && record.deletedBy === admin.id && record.updatedBy === admin.id
+    )).toBe(true);
+    const batchDeleteLog = await prisma.operationLog.findFirst({
+      where: {
+        module: "record",
+        bizType: "vehicle_use_record",
+        action: "batch_delete"
+      },
+      orderBy: {
+        createdAt: "desc"
+      }
+    });
+    expect(batchDeleteLog.afterData).toEqual(expect.objectContaining({
+      deletedCount: 2
+    }));
     expect(latestMileageResponse.body).toEqual({ startMileage: 900 });
     expect(listResponse.body.records.map((record) => record.reason)).toEqual(["KEEP-OLD"]);
   });
@@ -1124,6 +1254,45 @@ describe("Issue 4 registry API", () => {
     expect(response.headers["content-disposition"]).toContain(".pdf");
     expect(response.body.subarray(0, 4).toString()).toBe("%PDF");
     expect(pageCount).toBeGreaterThanOrEqual(1);
+  }, pdfExportTestTimeout);
+
+  it("exports pdf successfully when the pdf signature thumbnail is invalid but the original signature image is valid", async () => {
+    const employee = await prisma.user.findUnique({
+      where: {
+        username: "employee"
+      }
+    });
+    const vehicle = await createVehicle(prisma, {
+      vehicleCode: "CAR-777",
+      plateNumber: "沪A-17777",
+      brandModel: "特斯拉Model Y"
+    });
+
+    await createRecord(prisma, {
+      vehicleId: vehicle.id,
+      userId: employee.id,
+      businessDate: "2026-08-05",
+      departureTime: "13:52",
+      returnTime: "13:52",
+      startMileage: 20,
+      endMileage: 30,
+      distance: 10,
+      reason: "有事情假",
+      route: "北京-上海",
+      driverSignature: "user1",
+      driverSignatureImage: VALID_SIGNATURE_PNG_DATA_URL,
+      driverSignaturePdfImage: INVALID_SIGNATURE_JPEG_DATA_URL,
+      fuelFee: "5",
+      fuelVolume: "5",
+      createdAt: "2026-08-05T13:52:00.000Z"
+    });
+
+    const agent = await adminAgent();
+    const response = await getBinaryResponse(agent, "/api/records/export");
+
+    expect(response.status).toBe(200);
+    expect(response.headers["content-type"]).toContain("application/pdf");
+    expect(response.body.subarray(0, 4).toString()).toBe("%PDF");
   }, pdfExportTestTimeout);
 
   it("exports only records that match the current filters", async () => {

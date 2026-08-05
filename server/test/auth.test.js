@@ -1,27 +1,10 @@
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { createApp, createSessionStore } from "../src/app.js";
-
-const rootDir = path.resolve(import.meta.dirname, "../..");
-
-function runPrisma(args, databaseUrl) {
-  execFileSync("npx", ["prisma", ...args], {
-    cwd: rootDir,
-    env: {
-      ...process.env,
-      DATABASE_URL: databaseUrl
-    },
-    stdio: "pipe"
-  });
-}
+import { createApp } from "../src/app.js";
+import { createTestDatabase, runPrisma } from "../../test-support/mysqlTestDb.js";
 
 async function createUser(prisma, { username, password, role, isBuiltinAdmin = false }) {
   await prisma.user.create({
@@ -35,25 +18,26 @@ async function createUser(prisma, { username, password, role, isBuiltinAdmin = f
 }
 
 describe("Issue 1 authentication API", () => {
-  let tempDir;
+  let testDatabase;
   let prisma;
   let app;
 
   beforeAll(() => {
-    tempDir = mkdtempSync(path.join(tmpdir(), "vehicle-auth-"));
-    const databaseUrl = `file:${path.join(tempDir, "auth.db")}`;
-    runPrisma(["migrate", "deploy"], databaseUrl);
+    testDatabase = createTestDatabase("vehicle_auth");
+    runPrisma(["migrate", "deploy"], testDatabase.databaseUrl);
     prisma = new PrismaClient({
       datasources: {
         db: {
-          url: databaseUrl
+          url: testDatabase.databaseUrl
         }
       }
     });
-    app = createApp({ prisma, sessionStore: createSessionStore() });
+    app = createApp({ prisma });
   }, 30000);
 
   beforeEach(async () => {
+    await prisma.operationLog.deleteMany();
+    await prisma.session.deleteMany();
     await prisma.user.deleteMany();
     await createUser(prisma, {
       username: "admin",
@@ -70,9 +54,7 @@ describe("Issue 1 authentication API", () => {
 
   afterAll(async () => {
     await prisma?.$disconnect();
-    if (tempDir) {
-      rmSync(tempDir, { force: true, recursive: true });
-    }
+    testDatabase?.cleanup();
   });
 
   it("logs in an administrator with a valid username and password", async () => {
@@ -89,6 +71,34 @@ describe("Issue 1 authentication API", () => {
       }
     });
     expect(response.headers["set-cookie"]?.[0]).toContain("sessionId=");
+
+    const storedSessions = await prisma.session.findMany({
+      where: {
+        user: {
+          username: "admin"
+        }
+      }
+    });
+    const operationLog = await prisma.operationLog.findFirst({
+      where: {
+        action: "login",
+        operatorUserId: storedSessions[0].userId,
+        resultStatus: "success"
+      },
+      orderBy: {
+        createdAt: "desc"
+      }
+    });
+
+    expect(storedSessions).toHaveLength(1);
+    expect(storedSessions[0].status).toBe("active");
+    expect(operationLog).toEqual(expect.objectContaining({
+      module: "auth",
+      bizType: "session",
+      bizId: storedSessions[0].sessionToken,
+      action: "login",
+      resultStatus: "success"
+    }));
   });
 
   it("logs in an employee and returns the employee role", async () => {
@@ -116,6 +126,20 @@ describe("Issue 1 authentication API", () => {
     expect(missingAccount.status).toBe(401);
     expect(wrongPassword.body).toEqual({ message: "账号或密码错误" });
     expect(missingAccount.body).toEqual({ message: "账号或密码错误" });
+
+    const failedLogs = await prisma.operationLog.findMany({
+      where: {
+        module: "auth",
+        action: "login",
+        resultStatus: "failed"
+      },
+      orderBy: {
+        createdAt: "asc"
+      }
+    });
+
+    expect(failedLogs).toHaveLength(2);
+    expect(failedLogs.map((log) => log.afterData?.username)).toEqual(["employee", "missing"]);
   });
 
   it("rejects login when username or password is blank", async () => {
@@ -128,6 +152,35 @@ describe("Issue 1 authentication API", () => {
 
     expect(missingUsername.status).toBe(400);
     expect(missingPassword.status).toBe(400);
+  });
+
+  it("logs out by marking the stored session as logged out", async () => {
+    const agent = request.agent(app);
+
+    await agent.post("/api/login").send({ username: "admin", password: "admin" }).expect(200);
+    await agent.post("/api/logout").expect(204);
+
+    const storedSession = await prisma.session.findFirst({
+      where: {
+        user: {
+          username: "admin"
+        }
+      },
+      orderBy: {
+        createdAt: "desc"
+      }
+    });
+
+    expect(storedSession.status).toBe("loggedOut");
+    expect(storedSession.logoutAt).toBeTruthy();
+    expect(await prisma.operationLog.findFirst({
+      where: {
+        module: "auth",
+        bizType: "session",
+        bizId: storedSession.sessionToken,
+        action: "logout"
+      }
+    })).toBeTruthy();
   });
 
   it("rejects password changes when the user is not logged in", async () => {
@@ -143,6 +196,11 @@ describe("Issue 1 authentication API", () => {
 
   it("changes the current employee password, invalidates the current session, and rejects the old password", async () => {
     const agent = request.agent(app);
+    const employee = await prisma.user.findUnique({
+      where: {
+        username: "employee"
+      }
+    });
 
     await agent.post("/api/login").send({ username: "employee", password: "Employee001" }).expect(200);
 
@@ -154,6 +212,14 @@ describe("Issue 1 authentication API", () => {
 
     expect(changeResponse.status).toBe(200);
     expect(changeResponse.body).toEqual({ message: "密码已修改，请重新登录" });
+    expect(await prisma.operationLog.findFirst({
+      where: {
+        module: "auth",
+        bizType: "user",
+        action: "change_password",
+        operatorUserId: employee.id
+      }
+    })).toBeTruthy();
 
     await agent.post("/api/change-password").send({
       currentPassword: "NewEmployee001",

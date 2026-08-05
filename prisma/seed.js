@@ -1,11 +1,9 @@
+import "dotenv/config";
+
 import { PrismaClient } from "@prisma/client";
-import { PrismaBetterSQLite3 } from "@prisma/adapter-better-sqlite3";
 import bcrypt from "bcryptjs";
 
-const databaseUrl = process.env.DATABASE_URL ?? "file:./dev.db";
-const prisma = new PrismaClient({
-  adapter: new PrismaBetterSQLite3({ url: databaseUrl })
-});
+const prisma = new PrismaClient();
 
 async function main() {
   const passwordHash = await bcrypt.hash("admin", 10);

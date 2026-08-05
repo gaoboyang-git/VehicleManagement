@@ -1,6 +1,8 @@
 .DS_Store
 node_modules/
 .env
+.playwright-cli/
+output/
 *.db
 *.db-journal
 *.sqlite

@@ -4,7 +4,6 @@ import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
-import { PrismaBetterSQLite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaClient } from "@prisma/client";
 import fontkit from "@pdf-lib/fontkit";
 import bcrypt from "bcryptjs";
@@ -13,11 +12,9 @@ import express from "express";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { getRegistryConstraintErrors } from "../../shared/registryConstraints.js";
 
-const databaseUrl = process.env.DATABASE_URL ?? "file:./dev.db";
 const appDirectory = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
-const defaultPrisma = new PrismaClient({
-  adapter: new PrismaBetterSQLite3({ url: databaseUrl })
-});
+const defaultPrisma = new PrismaClient();
+const defaultSessionTtlMs = 7 * 24 * 60 * 60 * 1000;
 
 function toPublicUser(user) {
   return {
@@ -80,6 +77,28 @@ function toManagedRecord(record) {
     registrantUsername: record.user.username,
     registrantName: resolveRecordDriverName(record),
     createdAt: record.createdAt.toISOString()
+  };
+}
+
+function toManagedOperationLog(log) {
+  return {
+    id: log.id,
+    module: log.module,
+    bizType: log.bizType,
+    bizId: log.bizId,
+    action: log.action,
+    operatorUserId: log.operatorUserId,
+    operatorUsername: log.operator?.username ?? "",
+    operatorName: resolveUserFullName(log.operator),
+    requestPath: log.requestPath,
+    requestMethod: log.requestMethod,
+    requestIp: log.requestIp,
+    resultStatus: log.resultStatus,
+    errorMessage: log.errorMessage,
+    beforeData: log.beforeData,
+    afterData: log.afterData,
+    operatedAt: log.operatedAt.toISOString(),
+    createdAt: log.createdAt.toISOString()
   };
 }
 
@@ -687,19 +706,57 @@ async function createRecordsPdf(records) {
     }
   }
 
-  async function drawSignatureImage(page, record, x, rowTopY, width, rowHeight) {
-    const signatureImageDataUrl = record.driverSignaturePdfImage || record.driverSignatureImage;
+  async function embedSignatureImageDataUrl(signatureImageDataUrl) {
+    const cachedImage = imageCache.get(signatureImageDataUrl);
 
-    if (!signatureImageDataUrl) {
+    if (cachedImage === null) {
+      return null;
+    }
+
+    if (cachedImage) {
+      return cachedImage;
+    }
+
+    const { bytes, format } = decodeSignatureImage(signatureImageDataUrl);
+
+    try {
+      const embeddedImage = format === "png" ? await pdfDoc.embedPng(bytes) : await pdfDoc.embedJpg(bytes);
+      imageCache.set(signatureImageDataUrl, embeddedImage);
+      return embeddedImage;
+    } catch {
+      try {
+        const fallbackImage = format === "png" ? await pdfDoc.embedJpg(bytes) : await pdfDoc.embedPng(bytes);
+        imageCache.set(signatureImageDataUrl, fallbackImage);
+        return fallbackImage;
+      } catch {
+        imageCache.set(signatureImageDataUrl, null);
+        return null;
+      }
+    }
+  }
+
+  async function drawSignatureImage(page, record, x, rowTopY, width, rowHeight) {
+    const signatureImageCandidates = [
+      record.driverSignaturePdfImage,
+      record.driverSignatureImage
+    ].filter(Boolean);
+
+    if (signatureImageCandidates.length === 0) {
       return;
     }
 
-    let embeddedImage = imageCache.get(signatureImageDataUrl);
+    let embeddedImage = null;
+
+    for (const signatureImageDataUrl of signatureImageCandidates) {
+      embeddedImage = await embedSignatureImageDataUrl(signatureImageDataUrl);
+
+      if (embeddedImage) {
+        break;
+      }
+    }
 
     if (!embeddedImage) {
-      const { bytes, format } = decodeSignatureImage(signatureImageDataUrl);
-      embeddedImage = format === "png" ? await pdfDoc.embedPng(bytes) : await pdfDoc.embedJpg(bytes);
-      imageCache.set(signatureImageDataUrl, embeddedImage);
+      return;
     }
 
     const targetWidth = width - 10;
@@ -842,6 +899,18 @@ function readRecordFilters(request) {
   };
 }
 
+function readOperationLogFilters(request) {
+  return {
+    keyword: String(request.query.keyword ?? "").trim().toLowerCase(),
+    module: String(request.query.module ?? "").trim(),
+    action: String(request.query.action ?? "").trim(),
+    operatorUserId: String(request.query.operatorUserId ?? "").trim(),
+    resultStatus: String(request.query.resultStatus ?? "").trim(),
+    dateFrom: String(request.query.dateFrom ?? "").trim(),
+    dateTo: String(request.query.dateTo ?? "").trim()
+  };
+}
+
 function recordMatchesFilters(record, filters) {
   const registrantName = resolveRecordDriverName(record);
 
@@ -883,6 +952,9 @@ function recordMatchesFilters(record, filters) {
 
 async function loadManagedRecords(prisma, filters = {}) {
   const records = await prisma.vehicleUseRecord.findMany({
+    where: {
+      deletedAt: null
+    },
     include: {
       vehicle: true,
       user: true
@@ -894,6 +966,63 @@ async function loadManagedRecords(prisma, filters = {}) {
     .sort((left, right) => {
       if (left.businessDate !== right.businessDate) {
         return right.businessDate.localeCompare(left.businessDate);
+      }
+
+      return right.createdAt.getTime() - left.createdAt.getTime();
+    });
+}
+
+function operationLogMatchesFilters(log, filters) {
+  const operatorName = resolveUserFullName(log.operator);
+  const operatedDate = log.operatedAt instanceof Date ? log.operatedAt.toISOString().slice(0, 10) : "";
+  const matchesKeyword = filters.keyword
+    ? [
+        log.module,
+        log.bizType,
+        log.bizId ?? "",
+        log.action,
+        log.operator?.username ?? "",
+        operatorName,
+        log.requestPath ?? "",
+        log.requestMethod ?? "",
+        log.requestIp ?? "",
+        log.resultStatus,
+        log.errorMessage ?? ""
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(filters.keyword)
+    : true;
+  const matchesModule = filters.module ? log.module === filters.module : true;
+  const matchesAction = filters.action ? log.action === filters.action : true;
+  const matchesOperator = filters.operatorUserId ? log.operatorUserId === filters.operatorUserId : true;
+  const matchesStatus = filters.resultStatus ? log.resultStatus === filters.resultStatus : true;
+  const matchesDateFrom = filters.dateFrom ? operatedDate >= filters.dateFrom : true;
+  const matchesDateTo = filters.dateTo ? operatedDate <= filters.dateTo : true;
+
+  return (
+    matchesKeyword &&
+    matchesModule &&
+    matchesAction &&
+    matchesOperator &&
+    matchesStatus &&
+    matchesDateFrom &&
+    matchesDateTo
+  );
+}
+
+async function loadManagedOperationLogs(prisma, filters = {}) {
+  const logs = await prisma.operationLog.findMany({
+    include: {
+      operator: true
+    }
+  });
+
+  return logs
+    .filter((log) => operationLogMatchesFilters(log, filters))
+    .sort((left, right) => {
+      if (left.operatedAt.getTime() !== right.operatedAt.getTime()) {
+        return right.operatedAt.getTime() - left.operatedAt.getTime();
       }
 
       return right.createdAt.getTime() - left.createdAt.getTime();
@@ -927,6 +1056,86 @@ function clearSessionCookie(response) {
   });
 }
 
+function toAuditJson(value, { omitKeys = [] } = {}) {
+  if (value === undefined) {
+    return null;
+  }
+
+  const json = JSON.stringify(value, (key, currentValue) => {
+    if (omitKeys.includes(key)) {
+      return undefined;
+    }
+
+    if (currentValue instanceof Date) {
+      return currentValue.toISOString();
+    }
+
+    return currentValue;
+  });
+
+  return json ? JSON.parse(json) : null;
+}
+
+function resolveRequestIp(request) {
+  const forwardedFor = request.headers["x-forwarded-for"];
+
+  if (typeof forwardedFor === "string" && forwardedFor.trim()) {
+    return forwardedFor.split(",")[0].trim();
+  }
+
+  return request.ip || request.socket?.remoteAddress || null;
+}
+
+function buildOperationLogInput(request, {
+  module,
+  bizType,
+  bizId = null,
+  action,
+  operatorUserId,
+  beforeData,
+  afterData,
+  resultStatus = "success",
+  errorMessage = null
+}) {
+  return {
+    module,
+    bizType,
+    bizId,
+    action,
+    operatorUserId: operatorUserId ?? request.auth?.user?.id ?? null,
+    requestPath: request.path,
+    requestMethod: request.method,
+    requestIp: resolveRequestIp(request),
+    userAgent: String(request.headers["user-agent"] ?? "").trim() || null,
+    beforeData: beforeData ?? null,
+    afterData: afterData ?? null,
+    resultStatus,
+    errorMessage
+  };
+}
+
+function buildCreateAuditFields(request) {
+  return {
+    createdBy: request.auth?.user?.id ?? null,
+    updatedBy: request.auth?.user?.id ?? null
+  };
+}
+
+function buildUpdateAuditFields(request) {
+  return {
+    updatedBy: request.auth?.user?.id ?? null
+  };
+}
+
+function buildSoftDeleteFields(request, now, { includeVehicleFlag = false } = {}) {
+  return {
+    ...(includeVehicleFlag ? { isDeleted: true } : {}),
+    ...buildUpdateAuditFields(request),
+    deletedAt: now,
+    deletedBy: request.auth?.user?.id ?? null
+  };
+}
+
 function asyncHandler(handler) {
   return (request, response, next) => {
     Promise.resolve(handler(request, response, next)).catch(next);
@@ -934,46 +1143,171 @@ function asyncHandler(handler) {
 }
 
 export function createSessionStore() {
+  return createSessionStoreWithMemory();
+}
+
+function createSessionStoreWithMemory() {
   const sessions = new Map();
 
   return {
-    create(userId) {
+    async create(userId) {
       const sessionId = randomUUID();
       sessions.set(sessionId, userId);
       return sessionId;
     },
-    get(sessionId) {
+    async get(sessionId) {
       return sessions.get(sessionId);
     },
-    delete(sessionId) {
+    async delete(sessionId) {
       sessions.delete(sessionId);
+    },
+    async deleteByUserId(userId) {
+      for (const [sessionId, storedUserId] of sessions.entries()) {
+        if (storedUserId === userId) {
+          sessions.delete(sessionId);
+        }
+      }
     }
   };
 }
 
-export function createApp({ prisma = defaultPrisma, sessionStore = createSessionStore() } = {}) {
+export function createPersistentSessionStore(prisma, { sessionTtlMs = defaultSessionTtlMs } = {}) {
+  return {
+    async create(userId) {
+      const sessionId = randomUUID();
+      const now = new Date();
+      const expiredAt = new Date(now.getTime() + sessionTtlMs);
+
+      await prisma.session.create({
+        data: {
+          sessionToken: sessionId,
+          userId,
+          loginAt: now,
+          expiredAt,
+          status: "active"
+        }
+      });
+
+      return sessionId;
+    },
+    async get(sessionId) {
+      if (!sessionId) {
+        return undefined;
+      }
+
+      const session = await prisma.session.findUnique({
+        where: {
+          sessionToken: sessionId
+        }
+      });
+
+      if (!session) {
+        return undefined;
+      }
+
+      if (session.status !== "active" || session.logoutAt) {
+        return undefined;
+      }
+
+      if (session.expiredAt.getTime() <= Date.now()) {
+        await prisma.session.updateMany({
+          where: {
+            sessionToken: sessionId,
+            status: "active",
+            logoutAt: null
+          },
+          data: {
+            status: "expired"
+          }
+        });
+        return undefined;
+      }
+
+      return session.userId;
+    },
+    async delete(sessionId) {
+      if (!sessionId) {
+        return;
+      }
+
+      await prisma.session.updateMany({
+        where: {
+          sessionToken: sessionId,
+          status: "active",
+          logoutAt: null
+        },
+        data: {
+          status: "loggedOut",
+          logoutAt: new Date()
+        }
+      });
+    },
+    async deleteByUserId(userId, { hardDelete = false } = {}) {
+      if (!userId) {
+        return;
+      }
+
+      if (hardDelete) {
+        await prisma.session.deleteMany({
+          where: {
+            userId
+          }
+        });
+        return;
+      }
+
+      await prisma.session.updateMany({
+        where: {
+          userId,
+          status: "active",
+          logoutAt: null
+        },
+        data: {
+          status: "loggedOut",
+          logoutAt: new Date()
+        }
+      });
+    }
+  };
+}
+
+export function createApp({ prisma = defaultPrisma, sessionStore = createPersistentSessionStore(prisma) } = {}) {
   const app = express();
   const clientDistPath = resolve(process.cwd(), "dist");
 
   app.use(cors({ credentials: true, origin: true }));
   app.use(express.json({ limit: "4mb" }));
 
+  async function writeOperationLogWithClient(dbClient, request, payload) {
+    await dbClient.operationLog.create({
+      data: buildOperationLogInput(request, payload)
+    });
+  }
+
+  async function writeOperationLog(request, payload) {
+    await writeOperationLogWithClient(prisma, request, payload);
+  }
+
   async function requireLogin(request, response, next) {
     const sessionId = readCookie(request, "sessionId");
-    const userId = sessionId ? sessionStore.get(sessionId) : undefined;
+    const userId = sessionId ? await sessionStore.get(sessionId) : undefined;
 
     if (!sessionId || !userId) {
+      if (sessionId) {
+        clearSessionCookie(response);
+      }
       return response.status(401).json({ message: "未登录" });
     }
 
-    const user = await prisma.user.findUnique({
+    const user = await prisma.user.findFirst({
       where: {
-        id: userId
+        id: userId,
+        deletedAt: null
       }
     });
 
     if (!user) {
-      sessionStore.delete(sessionId);
+      await sessionStore.delete(sessionId);
       clearSessionCookie(response);
       return response.status(401).json({ message: "未登录" });
     }
@@ -1007,34 +1341,106 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
         return response.status(400).json({ message: "账号和密码必填" });
       }
 
-      const user = await prisma.user.findUnique({
+      const user = await prisma.user.findFirst({
         where: {
-          username
+          username,
+          deletedAt: null
         }
       });
       const isValidPassword = user ? await bcrypt.compare(password, user.passwordHash) : false;
 
       if (!user || !isValidPassword) {
+        await writeOperationLog(request, {
+          module: "auth",
+          bizType: "session",
+          action: "login",
+          afterData: toAuditJson({ username }),
+          resultStatus: "failed",
+          errorMessage: "账号或密码错误"
+        });
         return response.status(401).json({ message: "账号或密码错误" });
       }
 
-      const sessionId = sessionStore.create(user.id);
+      const sessionId = randomUUID();
+      const sessionExpiresAt = new Date(Date.now() + defaultSessionTtlMs);
+
+      await prisma.$transaction(async (tx) => {
+        await tx.session.create({
+          data: {
+            sessionToken: sessionId,
+            userId: user.id,
+            loginAt: new Date(),
+            expiredAt: sessionExpiresAt,
+            status: "active"
+          }
+        });
+
+        await writeOperationLogWithClient(tx, request, {
+          module: "auth",
+          bizType: "session",
+          bizId: sessionId,
+          action: "login",
+          operatorUserId: user.id,
+          afterData: toAuditJson({
+            sessionId,
+            user
+          }, {
+            omitKeys: ["passwordHash"]
+          })
+        });
+      });
+
       setSessionCookie(response, sessionId);
 
       return response.json({ user: toPublicUser(user) });
     })
   );
 
-  app.post("/api/logout", (request, response) => {
-    const sessionId = readCookie(request, "sessionId");
+  app.post(
+    "/api/logout",
+    asyncHandler(async (request, response) => {
+      const sessionId = readCookie(request, "sessionId");
+      const userId = sessionId ? await sessionStore.get(sessionId) : undefined;
+      const user = userId ? await prisma.user.findUnique({
+        where: {
+          id: userId
+        }
+      }) : null;
 
-    if (sessionId) {
-      sessionStore.delete(sessionId);
-    }
+      if (sessionId) {
+        await prisma.$transaction(async (tx) => {
+          await tx.session.updateMany({
+            where: {
+              sessionToken: sessionId,
+              status: "active",
+              logoutAt: null
+            },
+            data: {
+              status: "loggedOut",
+              logoutAt: new Date()
+            }
+          });
 
-    clearSessionCookie(response);
-    return response.sendStatus(204);
-  });
+          await writeOperationLogWithClient(tx, request, {
+            module: "auth",
+            bizType: "session",
+            bizId: sessionId,
+            action: "logout",
+            operatorUserId: user?.id ?? null,
+            beforeData: toAuditJson({
+              sessionId,
+              user
+            }, {
+              omitKeys: ["passwordHash"]
+            })
+          });
+        });
+      }
+
+      clearSessionCookie(response);
+      return response.sendStatus(204);
+    })
+  );
 
   app.post(
     "/api/change-password",
@@ -1069,16 +1475,43 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
         return response.status(400).json({ message: "当前密码错误" });
       }
 
-      await prisma.user.update({
-        where: {
-          id: request.auth.user.id
-        },
-        data: {
-          passwordHash: await bcrypt.hash(newPassword, 10)
-        }
-      });
+      const newPasswordHash = await bcrypt.hash(newPassword, 10);
+      await prisma.$transaction(async (tx) => {
+        await tx.user.update({
+          where: {
+            id: request.auth.user.id
+          },
+          data: {
+            passwordHash: newPasswordHash,
+            ...buildUpdateAuditFields(request)
+          }
+        });
 
-      sessionStore.delete(request.auth.sessionId);
+        await tx.session.updateMany({
+          where: {
+            sessionToken: request.auth.sessionId,
+            status: "active",
+            logoutAt: null
+          },
+          data: {
+            status: "loggedOut",
+            logoutAt: new Date()
+          }
+        });
+
+        await writeOperationLogWithClient(tx, request, {
+          module: "auth",
+          bizType: "user",
+          bizId: request.auth.user.id,
+          action: "change_password",
+          beforeData: toAuditJson(request.auth.user, {
+            omitKeys: ["passwordHash"]
+          }),
+          afterData: toAuditJson({
+            sessionInvalidated: true
+          })
+        })
+      });
       clearSessionCookie(response);
 
       return response.json({ message: "密码已修改，请重新登录" });
@@ -1091,6 +1524,9 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
     requireAdmin,
     asyncHandler(async (_request, response) => {
       const users = await prisma.user.findMany({
+        where: {
+          deletedAt: null
+        },
         orderBy: {
           createdAt: "asc"
         }
@@ -1128,14 +1564,30 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
         return response.status(409).json({ message: "账号已存在" });
       }
 
-      const user = await prisma.user.create({
-        data: {
-          username,
-          fullName,
-          passwordHash: await bcrypt.hash(password, 10),
-          role,
-          isBuiltinAdmin: false
-        }
+      const passwordHash = await bcrypt.hash(password, 10);
+      const user = await prisma.$transaction(async (tx) => {
+        const createdUser = await tx.user.create({
+          data: {
+            username,
+            fullName,
+            passwordHash,
+            role,
+            isBuiltinAdmin: false,
+            ...buildCreateAuditFields(request)
+          }
+        });
+
+        await writeOperationLogWithClient(tx, request, {
+          module: "user",
+          bizType: "user",
+          bizId: createdUser.id,
+          action: "create",
+          afterData: toAuditJson(createdUser, {
+            omitKeys: ["passwordHash"]
+          })
+        });
+
+        return createdUser;
       });
 
       return response.status(201).json({ user: toManagedUser(user) });
@@ -1147,9 +1599,10 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
     requireLogin,
     requireAdmin,
     asyncHandler(async (request, response) => {
-      const user = await prisma.user.findUnique({
+      const user = await prisma.user.findFirst({
         where: {
-          id: request.params.id
+          id: request.params.id,
+          deletedAt: null
         }
       });
 
@@ -1167,7 +1620,8 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
 
       const recordCount = await prisma.vehicleUseRecord.count({
         where: {
-          userId: user.id
+          userId: user.id,
+          deletedAt: null
         }
       });
 
@@ -1177,10 +1631,31 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
         });
       }
 
-      await prisma.user.delete({
-        where: {
-          id: user.id
-        }
+      await prisma.$transaction(async (tx) => {
+        await tx.session.deleteMany({
+          where: {
+            userId: user.id
+          }
+        });
+
+        const deletedAt = new Date();
+
+        await tx.user.update({
+          where: {
+            id: user.id
+          },
+          data: buildSoftDeleteFields(request, deletedAt)
+        });
+
+        await writeOperationLogWithClient(tx, request, {
+          module: "user",
+          bizType: "user",
+          bizId: user.id,
+          action: "delete",
+          beforeData: toAuditJson(user, {
+            omitKeys: ["passwordHash"]
+          })
+        });
       });
 
       return response.sendStatus(204);
@@ -1203,9 +1678,10 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
         return response.status(400).json({ message: "两次新密码不一致" });
       }
 
-      const user = await prisma.user.findUnique({
+      const user = await prisma.user.findFirst({
         where: {
-          id: request.params.id
+          id: request.params.id,
+          deletedAt: null
         }
       });
 
@@ -1218,15 +1694,43 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
       }
 
       if (request.auth.user.username === "admin") {
-        await prisma.user.update({
-          where: {
-            id: user.id
-          },
-          data: {
-            passwordHash: await bcrypt.hash(newPassword, 10)
-          }
-        });
+        const passwordHash = await bcrypt.hash(newPassword, 10);
+        await prisma.$transaction(async (tx) => {
+          await tx.user.update({
+            where: {
+              id: user.id
+            },
+            data: {
+              passwordHash,
+              ...buildUpdateAuditFields(request)
+            }
+          });
 
+          await tx.session.updateMany({
+            where: {
+              userId: user.id,
+              status: "active",
+              logoutAt: null
+            },
+            data: {
+              status: "loggedOut",
+              logoutAt: new Date()
+            }
+          });
+
+          await writeOperationLogWithClient(tx, request, {
+            module: "user",
+            bizType: "user",
+            bizId: user.id,
+            action: "reset_password",
+            beforeData: toAuditJson(user, {
+              omitKeys: ["passwordHash"]
+            }),
+            afterData: toAuditJson({
+              sessionInvalidated: true
+            })
+          })
+        });
         return response.json({ message: "密码已重置" });
       }
 
@@ -1234,16 +1738,55 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
         return response.status(400).json({ message: "只能重置普通用户密码" });
       }
 
-      await prisma.user.update({
-        where: {
-          id: user.id
-        },
-        data: {
-          passwordHash: await bcrypt.hash(newPassword, 10)
-        }
-      });
+      const passwordHash = await bcrypt.hash(newPassword, 10);
+      await prisma.$transaction(async (tx) => {
+        await tx.user.update({
+          where: {
+            id: user.id
+          },
+          data: {
+            passwordHash,
+            ...buildUpdateAuditFields(request)
+          }
+        });
 
+        await tx.session.updateMany({
+          where: {
+            userId: user.id,
+            status: "active",
+            logoutAt: null
+          },
+          data: {
+            status: "loggedOut",
+            logoutAt: new Date()
+          }
+        });
+
+        await writeOperationLogWithClient(tx, request, {
+          module: "user",
+          bizType: "user",
+          bizId: user.id,
+          action: "reset_password",
+          beforeData: toAuditJson(user, {
+            omitKeys: ["passwordHash"]
+          }),
+          afterData: toAuditJson({
+            sessionInvalidated: true
+          })
+        })
+      });
       return response.json({ message: "密码已重置" });
+    })
+  );
+
+  app.get(
+    "/api/operation-logs",
+    requireLogin,
+    requireAdmin,
+    asyncHandler(async (request, response) => {
+      const logs = await loadManagedOperationLogs(prisma, readOperationLogFilters(request));
+
+      return response.json({ logs: logs.map(toManagedOperationLog) });
     })
   );
 
@@ -1253,7 +1796,8 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
     asyncHandler(async (_request, response) => {
       const vehicles = await prisma.vehicle.findMany({
         where: {
-          isDeleted: false
+          isDeleted: false,
+          deletedAt: null
         },
         orderBy: {
           vehicleCode: "asc"
@@ -1268,9 +1812,11 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
     "/api/vehicles/:id/latest-mileage",
     requireLogin,
     asyncHandler(async (request, response) => {
-      const vehicle = await prisma.vehicle.findUnique({
+      const vehicle = await prisma.vehicle.findFirst({
         where: {
-          id: request.params.id
+          id: request.params.id,
+          isDeleted: false,
+          deletedAt: null
         }
       });
 
@@ -1280,7 +1826,8 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
 
       const latestRecord = await prisma.vehicleUseRecord.findFirst({
         where: {
-          vehicleId: vehicle.id
+          vehicleId: vehicle.id,
+          deletedAt: null
         },
         orderBy: {
           createdAt: "desc"
@@ -1329,13 +1876,26 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
         return response.status(409).json({ message: "车牌号已存在" });
       }
 
-      const vehicle = await prisma.vehicle.create({
-        data: {
-          vehicleCode,
-          plateNumber,
-          brandModel,
-          status
-        }
+      const vehicle = await prisma.$transaction(async (tx) => {
+        const createdVehicle = await tx.vehicle.create({
+          data: {
+            vehicleCode,
+            plateNumber,
+            brandModel,
+            status,
+            ...buildCreateAuditFields(request)
+          }
+        });
+
+        await writeOperationLogWithClient(tx, request, {
+          module: "vehicle",
+          bizType: "vehicle",
+          bizId: createdVehicle.id,
+          action: "create",
+          afterData: toAuditJson(createdVehicle)
+        });
+
+        return createdVehicle;
       });
 
       return response.status(201).json({ vehicle: toPublicVehicle(vehicle) });
@@ -1359,17 +1919,31 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
         }
       });
 
-      if (!vehicle || vehicle.isDeleted) {
+      if (!vehicle || vehicle.isDeleted || vehicle.deletedAt) {
         return response.status(404).json({ message: "车辆不存在" });
       }
 
-      const updatedVehicle = await prisma.vehicle.update({
-        where: {
-          id: vehicle.id
-        },
-        data: {
-          status
-        }
+      const updatedVehicle = await prisma.$transaction(async (tx) => {
+        const nextVehicle = await tx.vehicle.update({
+          where: {
+            id: vehicle.id
+          },
+          data: {
+            status,
+            ...buildUpdateAuditFields(request)
+          }
+        });
+
+        await writeOperationLogWithClient(tx, request, {
+          module: "vehicle",
+          bizType: "vehicle",
+          bizId: vehicle.id,
+          action: "update_status",
+          beforeData: toAuditJson(vehicle),
+          afterData: toAuditJson(nextVehicle)
+        });
+
+        return nextVehicle;
       });
 
       return response.json({ vehicle: toPublicVehicle(updatedVehicle) });
@@ -1391,17 +1965,27 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
         return response.status(404).json({ message: "车辆不存在" });
       }
 
-      if (vehicle.isDeleted) {
+      if (vehicle.isDeleted || vehicle.deletedAt) {
         return response.status(400).json({ message: "车辆已删除" });
       }
 
-      await prisma.vehicle.update({
-        where: {
-          id: vehicle.id
-        },
-        data: {
-          isDeleted: true
-        }
+      await prisma.$transaction(async (tx) => {
+        const deletedAt = new Date();
+
+        await tx.vehicle.update({
+          where: {
+            id: vehicle.id
+          },
+          data: buildSoftDeleteFields(request, deletedAt, { includeVehicleFlag: true })
+        });
+
+        await writeOperationLogWithClient(tx, request, {
+          module: "vehicle",
+          bizType: "vehicle",
+          bizId: vehicle.id,
+          action: "delete",
+          beforeData: toAuditJson(vehicle)
+        });
       });
 
       return response.sendStatus(204);
@@ -1525,9 +2109,11 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
         return response.status(400).json({ message: "终点公里不能小于起步公里" });
       }
 
-      const vehicle = await prisma.vehicle.findUnique({
+      const vehicle = await prisma.vehicle.findFirst({
         where: {
-          id: vehicleId
+          id: vehicleId,
+          isDeleted: false,
+          deletedAt: null
         }
       });
 
@@ -1535,30 +2121,45 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
         return response.status(400).json({ message: "车辆不存在或已失效" });
       }
 
-      const record = await prisma.vehicleUseRecord.create({
-        data: {
-          vehicleId: vehicle.id,
-          userId: request.auth.user.id,
-          businessDate,
-          departureTime,
-          returnTime,
-          reason,
-          route,
-          startMileage,
-          endMileage,
-          distance: endMileage - startMileage,
-          isCrossDay:
-            returnDateTime.date && businessDate
-              ? returnDateTime.date !== businessDate
-              : isReturnEarlierThanDeparture(departureTime, returnTime),
-          fuelFee,
-          fuelVolume,
-          driverName,
-          driverSignature: driverName,
-          driverSignatureImage: driverSignatureImage || null,
-          driverSignaturePdfImage: driverSignaturePdfImage || null,
-          remark
-        }
+      const record = await prisma.$transaction(async (tx) => {
+        const createdRecord = await tx.vehicleUseRecord.create({
+          data: {
+            vehicleId: vehicle.id,
+            userId: request.auth.user.id,
+            businessDate,
+            departureTime,
+            returnTime,
+            reason,
+            route,
+            startMileage,
+            endMileage,
+            distance: endMileage - startMileage,
+            isCrossDay:
+              returnDateTime.date && businessDate
+                ? returnDateTime.date !== businessDate
+                : isReturnEarlierThanDeparture(departureTime, returnTime),
+            fuelFee,
+            fuelVolume,
+            driverName,
+            driverSignature: driverName,
+            driverSignatureImage: driverSignatureImage || null,
+            driverSignaturePdfImage: driverSignaturePdfImage || null,
+            remark,
+            ...buildCreateAuditFields(request)
+          }
+        });
+
+        await writeOperationLogWithClient(tx, request, {
+          module: "record",
+          bizType: "vehicle_use_record",
+          bizId: createdRecord.id,
+          action: "create",
+          afterData: toAuditJson(createdRecord, {
+            omitKeys: ["driverSignatureImage", "driverSignaturePdfImage"]
+          })
+        });
+
+        return createdRecord;
       });
 
       return response.status(201).json({
@@ -1585,10 +2186,11 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
         where: {
           id: {
             in: ids
-          }
+          },
+          deletedAt: null
         },
-        select: {
-          id: true
+        orderBy: {
+          createdAt: "desc"
         }
       });
 
@@ -1596,12 +2198,31 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
         return response.status(404).json({ message: "记录不存在" });
       }
 
-      await prisma.vehicleUseRecord.deleteMany({
-        where: {
-          id: {
-            in: ids
-          }
-        }
+      await prisma.$transaction(async (tx) => {
+        const deletedAt = new Date();
+
+        await tx.vehicleUseRecord.updateMany({
+          where: {
+            id: {
+              in: ids
+            },
+            deletedAt: null
+          },
+          data: buildSoftDeleteFields(request, deletedAt)
+        });
+
+        await writeOperationLogWithClient(tx, request, {
+          module: "record",
+          bizType: "vehicle_use_record",
+          action: "batch_delete",
+          beforeData: toAuditJson(existingRecords, {
+            omitKeys: ["driverSignatureImage", "driverSignaturePdfImage"]
+          }),
+          afterData: toAuditJson({
+            deletedIds: ids,
+            deletedCount: ids.length
+          })
+        })
       });
 
       return response.json({
@@ -1616,9 +2237,10 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
     requireLogin,
     requireAdmin,
     asyncHandler(async (request, response) => {
-      const record = await prisma.vehicleUseRecord.findUnique({
+      const record = await prisma.vehicleUseRecord.findFirst({
         where: {
-          id: request.params.id
+          id: request.params.id,
+          deletedAt: null
         }
       });
 
@@ -1626,10 +2248,25 @@ export function createApp({ prisma = defaultPrisma, sessionStore = createSession
         return response.status(404).json({ message: "记录不存在" });
       }
 
-      await prisma.vehicleUseRecord.delete({
-        where: {
-          id: record.id
-        }
+      await prisma.$transaction(async (tx) => {
+        const deletedAt = new Date();
+
+        await tx.vehicleUseRecord.update({
+          where: {
+            id: record.id
+          },
+          data: buildSoftDeleteFields(request, deletedAt)
+        });
+
+        await writeOperationLogWithClient(tx, request, {
+          module: "record",
+          bizType: "vehicle_use_record",
+          bizId: record.id,
+          action: "delete",
+          beforeData: toAuditJson(record, {
+            omitKeys: ["driverSignatureImage", "driverSignaturePdfImage"]
+          })
+        });
       });
 
       return response.sendStatus(204);

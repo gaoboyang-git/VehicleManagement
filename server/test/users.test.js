@@ -1,27 +1,10 @@
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { createApp, createSessionStore } from "../src/app.js";
-
-const rootDir = path.resolve(import.meta.dirname, "../..");
-
-function runPrisma(args, databaseUrl) {
-  execFileSync("npx", ["prisma", ...args], {
-    cwd: rootDir,
-    env: {
-      ...process.env,
-      DATABASE_URL: databaseUrl
-    },
-    stdio: "pipe"
-  });
-}
+import { createApp } from "../src/app.js";
+import { createTestDatabase, runPrisma } from "../../test-support/mysqlTestDb.js";
 
 async function createUser(prisma, { username, password, role, isBuiltinAdmin = false }) {
   await prisma.user.create({
@@ -67,25 +50,26 @@ async function createRecord(prisma, { vehicleId, userId }) {
 }
 
 describe("Issue 2 user management API", () => {
-  let tempDir;
+  let testDatabase;
   let prisma;
   let app;
 
   beforeAll(() => {
-    tempDir = mkdtempSync(path.join(tmpdir(), "vehicle-users-"));
-    const databaseUrl = `file:${path.join(tempDir, "users.db")}`;
-    runPrisma(["migrate", "deploy"], databaseUrl);
+    testDatabase = createTestDatabase("vehicle_users");
+    runPrisma(["migrate", "deploy"], testDatabase.databaseUrl);
     prisma = new PrismaClient({
       datasources: {
         db: {
-          url: databaseUrl
+          url: testDatabase.databaseUrl
         }
       }
     });
-    app = createApp({ prisma, sessionStore: createSessionStore() });
+    app = createApp({ prisma });
   }, 30000);
 
   beforeEach(async () => {
+    await prisma.operationLog.deleteMany();
+    await prisma.session.deleteMany();
     await prisma.vehicleUseRecord.deleteMany();
     await prisma.vehicle.deleteMany();
     await prisma.user.deleteMany();
@@ -109,9 +93,7 @@ describe("Issue 2 user management API", () => {
 
   afterAll(async () => {
     await prisma?.$disconnect();
-    if (tempDir) {
-      rmSync(tempDir, { force: true, recursive: true });
-    }
+    testDatabase?.cleanup();
   });
 
   async function adminAgent() {
@@ -154,6 +136,11 @@ describe("Issue 2 user management API", () => {
 
   it("creates an employee account and rejects duplicate usernames", async () => {
     const agent = await adminAgent();
+    const admin = await prisma.user.findUnique({
+      where: {
+        username: "admin"
+      }
+    });
 
     const createResponse = await agent.post("/api/users").send({
       username: "new_employee",
@@ -172,6 +159,25 @@ describe("Issue 2 user management API", () => {
       role: "employee",
       isBuiltinAdmin: false
     }));
+    const storedUser = await prisma.user.findUnique({
+      where: {
+        username: "new_employee"
+      }
+    });
+    expect(storedUser).toEqual(expect.objectContaining({
+      createdBy: admin.id,
+      updatedBy: admin.id,
+      deletedAt: null,
+      deletedBy: null
+    }));
+    expect(await prisma.operationLog.findFirst({
+      where: {
+        module: "user",
+        bizType: "user",
+        action: "create",
+        bizId: createResponse.body.user.id
+      }
+    })).toBeTruthy();
     await request(app)
       .post("/api/login")
       .send({ username: "new_employee", password: "123" })
@@ -203,6 +209,11 @@ describe("Issue 2 user management API", () => {
 
   it("deletes a normal employee account and prevents re-login", async () => {
     const agent = await adminAgent();
+    const admin = await prisma.user.findUnique({
+      where: {
+        username: "admin"
+      }
+    });
     const employee = await prisma.user.findUnique({
       where: {
         username: "employee"
@@ -212,6 +223,25 @@ describe("Issue 2 user management API", () => {
     const deleteById = await agent.delete(`/api/users/${employee.id}`);
 
     expect(deleteById.status).toBe(204);
+    const deletedEmployee = await prisma.user.findUnique({
+      where: {
+        id: employee.id
+      }
+    });
+    expect(deletedEmployee).toEqual(expect.objectContaining({
+      id: employee.id,
+      deletedBy: admin.id,
+      updatedBy: admin.id
+    }));
+    expect(deletedEmployee.deletedAt).toBeTruthy();
+    expect(await prisma.operationLog.findFirst({
+      where: {
+        module: "user",
+        bizType: "user",
+        action: "delete",
+        bizId: employee.id
+      }
+    })).toBeTruthy();
     await request(app)
       .post("/api/login")
       .send({ username: "employee", password: "Employee001" })
@@ -280,6 +310,21 @@ describe("Issue 2 user management API", () => {
     });
 
     expect(response.status).toBe(200);
+    const resetLog = await prisma.operationLog.findFirst({
+      where: {
+        module: "user",
+        bizType: "user",
+        action: "reset_password",
+        bizId: employee.id
+      },
+      orderBy: {
+        createdAt: "desc"
+      }
+    });
+    expect(resetLog).toBeTruthy();
+    expect(resetLog.afterData).toEqual(expect.objectContaining({
+      sessionInvalidated: true
+    }));
 
     await request(app)
       .post("/api/login")
